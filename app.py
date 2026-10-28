@@ -26,14 +26,14 @@ from core import db, library, profile  # noqa: E402
 from ui import state, theme  # noqa: E402
 from ui.pages import (  # noqa: E402
     changelog_page, cluster_page, dashboard, dedupe_page, gaps_page,
-    graph_page, library_page, profile_page, projects_page, recommend_page,
-    search_page, settings_page, summary_page,
+    graph_page, library_page, profile_page, projects_page, reading_page,
+    recommend_page, search_page, settings_page, summary_page,
 )
 import version  # noqa: E402
 
 # 分组只是为了「找得到」，路由仍是扁平字典
 GROUPS: list[tuple[str, list[str]]] = [
-    ("研究", ["工作台", "文献检索", "摘要工坊", "文献库", "研究项目", "推荐", "研究画像"]),
+    ("研究", ["工作台", "文献检索", "摘要工坊", "待读", "文献库", "研究项目", "推荐", "研究画像"]),
     ("分析", ["查重中心", "关联图谱", "主题聚类", "缺口与方向"]),
     ("系统", ["更新日志", "设置"]),
 ]
@@ -42,6 +42,7 @@ PAGES = {
     "工作台": dashboard.render,
     "文献检索": search_page.render,
     "摘要工坊": summary_page.render,
+    "待读": reading_page.render,
     "文献库": library_page.render,
     "研究项目": projects_page.render,
     "推荐": recommend_page.render,

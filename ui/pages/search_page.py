@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from core import export, library, schema, summarize
+from core import export, library, reading, schema, summarize
 from core import text as T
 from core.sources import SOURCE_INFO, default_sources
 from ui import state, theme
@@ -96,10 +96,18 @@ def _paper_block(p: dict, idx: int) -> None:
     if p.get("arxiv_id"):
         badges.append("预印本")
 
-    c1, c2 = st.columns([0.86, 0.14])
+    c1, c2 = st.columns([0.84, 0.16])
     with c1:
         st.markdown(theme.paper_row(p, abstract_chars=300, badges=badges), unsafe_allow_html=True)
     with c2:
+        queued = reading.has(sid)
+        if st.button("已待读" if queued else "设为待读", key=f"read_{sid}_{idx}",
+                     use_container_width=True, type="primary" if not queued else "secondary"):
+            if queued:
+                st.toast("已在待读队列")
+            else:
+                reading.add_one(p, priority=2, source="检索")
+                st.toast("已加入待读")
         saved = library.has(sid)
         if st.button("已收藏" if saved else "收藏", key=f"fav_{sid}_{idx}", use_container_width=True):
             if not saved:

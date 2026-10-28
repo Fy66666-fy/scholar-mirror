@@ -28,7 +28,7 @@ def _masthead(data: dict) -> None:
         f'<div style="font-size:13px;color:#6b767c;">'
         f'{today.year} 年 {today.month} 月 {today.day} 日　周{_WEEK[today.weekday()]}</div>'
         f'<div style="font-size:12.5px;color:#8b9499;">'
-        f'库里 {lib["papers"]} 篇　·　在读 {lib["reading"]} 篇　·　'
+        f'库里 {lib["papers"]} 篇　·　待读 {data["reading"]["pending"]} 篇　·　'
         f'{proj["active"]} 个项目在推进　·　连续 {data["streak"]} 天有记录</div></div>',
         unsafe_allow_html=True,
     )
@@ -40,9 +40,11 @@ def _today(data: dict) -> None:
     gaps = [c for c in data["coverage"] if c["papers"] == 0]
 
     items: list[tuple[str, str, str, str]] = []   # (标签, 标题, 说明, 跳转)
-    if lib["unread"]:
-        items.append(("待读", f"{lib['unread']} 篇还没开始读",
-                      "从文献库里挑一篇，标成「在读」就会进队列", "文献库"))
+    pending = data["reading"]["pending"]
+    if pending:
+        high = data["reading"]["high"]
+        items.append(("待读", f"队列里 {pending} 篇，其中 {high} 篇高优先",
+                      "按优先级往下读，读完自动进「已读」", "待读"))
     next_ms = None
     for p in proj:
         ms = [m for m in workspace.milestones(p["id"]) if not m["done"]]
@@ -79,7 +81,7 @@ def _today(data: dict) -> None:
 
 
 def _queue(queue: list[dict]) -> None:
-    theme.section("阅读队列", "「在读」优先，其次是最近入库的。", "")
+    theme.section("阅读队列", "来自待读队列，高优先在前。", "")
     if not queue:
         st.caption("队列是空的。")
         return
