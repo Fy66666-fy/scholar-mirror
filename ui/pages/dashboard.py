@@ -1,235 +1,214 @@
-"""工作台首页：一屏看完「我在做什么、做到哪、下一步做什么」。
+"""工作台首页：以「今天」为单位，而不是以「功能」为单位。
 
-和 v0.1 的「首页」不同：那个是产品介绍页，这个是驾驶舱。
-介绍页挪到「设置 · 关于」，因为用过三天的人不需要再看一遍功能列表，
-但每天都需要知道：还有几篇没读、哪个项目卡住了、画像覆盖到哪。
+设计上刻意去掉了大标题和指标卡片墙 —— 那套东西第一眼好看，第二天就变成噪音。
+这里只回答三个问题：
+    今天该读什么（阅读队列 + 未读）
+    今天能推进什么（项目里下一个没完成的里程碑）
+    哪里还是空白（画像里有方向但库里没文献）
 """
 from __future__ import annotations
 
 import datetime as dt
-import time
 
 import streamlit as st
 
-from core import activity, library, notes, profile, stats, workspace
+from core import library, notes, profile, stats, workspace
 from ui import state, theme
 
-
-def _greeting() -> str:
-    h = dt.datetime.now().hour
-    if h < 6:
-        return "还在实验室"
-    if h < 11:
-        return "早上好"
-    if h < 14:
-        return "中午好"
-    if h < 19:
-        return "下午好"
-    return "晚上好"
+_WEEK = "一二三四五六日"
 
 
-def _onboarding() -> None:
-    theme.section("三步开始", "工作台需要先知道你在研究什么，后面所有推荐与统计才有意义。", "00")
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        theme.card(
-            '<div style="font-size:12px;color:#a8822f;font-weight:600;letter-spacing:.08em;">STEP 1</div>'
-            '<div style="font-size:15px;font-weight:700;margin:6px 0;">建一个研究方向</div>'
-            '<div style="font-size:13px;line-height:1.7;color:#4a5a63;">'
-            '一句话标签 + 几个关键词。关键词决定推荐召回，写具体一点效果差别很大。</div>',
-            tone="tight",
-        )
-        if st.button("去建画像 →", use_container_width=True, key="ob_profile"):
-            st.session_state["_goto"] = "研究画像"
-            st.rerun()
-    with c2:
-        theme.card(
-            '<div style="font-size:12px;color:#a8822f;font-weight:600;letter-spacing:.08em;">STEP 2</div>'
-            '<div style="font-size:15px;font-weight:700;margin:6px 0;">检索或导入文献</div>'
-            '<div style="font-size:13px;line-height:1.7;color:#4a5a63;">'
-            '从六个数据源检索，或把 Zotero 里已有的 BibTeX 导进来，收藏即入库。</div>',
-            tone="tight",
-        )
-        if st.button("去检索 →", use_container_width=True, key="ob_search"):
-            st.session_state["_goto"] = "文献检索"
-            st.rerun()
-    with c3:
-        theme.card(
-            '<div style="font-size:12px;color:#a8822f;font-weight:600;letter-spacing:.08em;">STEP 3</div>'
-            '<div style="font-size:15px;font-weight:700;margin:6px 0;">开一个研究项目</div>'
-            '<div style="font-size:13px;line-height:1.7;color:#4a5a63;">'
-            '把文献挂到项目下，设里程碑，进度会自动出现在这一页。</div>',
-            tone="tight",
-        )
-        if st.button("去建项目 →", use_container_width=True, key="ob_project"):
-            st.session_state["_goto"] = "研究项目"
-            st.rerun()
-
-    if st.button("先载入演示数据看看", key="ob_demo"):
-        state.load_demo(seed_workspace=True)
-        st.session_state["_goto"] = "工作台"
-        st.rerun()
+def _masthead(data: dict) -> None:
+    lib = data["library"]
+    today = dt.date.today()
+    proj = data["project_stats"]
+    st.markdown(
+        f'<div style="display:flex;justify-content:space-between;align-items:baseline;'
+        f'border-bottom:1px solid #e4ded3;padding-bottom:10px;margin-bottom:18px;">'
+        f'<div style="font-size:13px;color:#6b767c;">'
+        f'{today.year} 年 {today.month} 月 {today.day} 日　周{_WEEK[today.weekday()]}</div>'
+        f'<div style="font-size:12.5px;color:#8b9499;">'
+        f'库里 {lib["papers"]} 篇　·　在读 {lib["reading"]} 篇　·　'
+        f'{proj["active"]} 个项目在推进　·　连续 {data["streak"]} 天有记录</div></div>',
+        unsafe_allow_html=True,
+    )
 
 
-def _queue(lib: dict, queue: list[dict]) -> None:
-    theme.section("阅读队列", "标为「在读」的会排在最前；没标过就按入库时间给最近几篇。", "01")
+def _today(data: dict) -> None:
+    lib = data["library"]
+    proj = data["projects"]
+    gaps = [c for c in data["coverage"] if c["papers"] == 0]
+
+    items: list[tuple[str, str, str, str]] = []   # (标签, 标题, 说明, 跳转)
+    if lib["unread"]:
+        items.append(("待读", f"{lib['unread']} 篇还没开始读",
+                      "从文献库里挑一篇，标成「在读」就会进队列", "文献库"))
+    next_ms = None
+    for p in proj:
+        ms = [m for m in workspace.milestones(p["id"]) if not m["done"]]
+        if ms:
+            next_ms = (p, ms[0])
+            break
+    if next_ms:
+        p, m = next_ms
+        items.append(("推进", f"{p['name']}：{m['title']}",
+                      f"项目进度 {p['progress']}%，这是下一个没打勾的里程碑", "研究项目"))
+    if gaps:
+        names = "、".join(g["label"] for g in gaps[:2])
+        items.append(("空白", f"方向「{names}」在库里还是 0 篇",
+                      "要么去检索，要么把关键词写具体一点", "推荐"))
+    if not items:
+        items.append(("开始", "库里还没有文献",
+                      "检索一次，或者把 Zotero 的 BibTeX 导进来", "文献检索"))
+
+    theme.section("今天", "", "")
+    cols = st.columns(min(len(items), 3))
+    for col, (tag, title, desc, target) in zip(cols, items):
+        with col:
+            st.markdown(
+                f'<div class="sm-card tight" style="min-height:104px;">'
+                f'<div style="font-size:10.5px;letter-spacing:.12em;color:#a8822f;">{tag}</div>'
+                f'<div style="font-size:14px;font-weight:650;line-height:1.5;margin:6px 0 4px;">'
+                f'{theme.esc(title)}</div>'
+                f'<div style="font-size:12.3px;color:#6b767c;line-height:1.65;">{theme.esc(desc)}</div>'
+                f'</div>', unsafe_allow_html=True,
+            )
+            if st.button(f"{target} →", key=f"today_{target}_{tag}", use_container_width=True):
+                st.session_state["_goto"] = target
+                st.rerun()
+
+
+def _queue(queue: list[dict]) -> None:
+    theme.section("阅读队列", "「在读」优先，其次是最近入库的。", "")
     if not queue:
-        theme.empty("队列是空的", "去文献库把几篇标成「在读」，它们会出现在这里。")
+        st.caption("队列是空的。")
         return
     for p in queue:
-        badges = []
-        if p.get("_state"):
-            badges.append(p["_state"])
-        if p.get("_group"):
-            badges.append(p["_group"])
+        meta = " · ".join(x for x in [p.get("_group"), p.get("_state")] if x)
         st.markdown(
-            theme.paper_row(p, abstract_chars=110, badges=badges),
+            f'<div style="padding:9px 0;border-bottom:1px dashed #ece7dd;">'
+            f'<div style="font-size:13.5px;font-weight:600;line-height:1.5;">'
+            f'{theme.esc(p.get("title", ""))}</div>'
+            f'<div style="font-size:11.8px;color:#8b9499;margin-top:2px;">'
+            f'{theme.esc(str(p.get("year") or "—"))}　{theme.esc(meta)}</div></div>',
             unsafe_allow_html=True,
         )
 
 
-def _activity_panel(rows: list[dict]) -> None:
-    theme.section("最近活动", "", "02")
+def _notes_panel() -> None:
+    rows = notes.list_notes(limit=5)
+    theme.section("最近笔记", "", "")
     if not rows:
-        st.caption("还没有记录。检索、收藏、写笔记都会出现在这里。")
+        st.caption("还没有笔记。读到关键处按一下「记一笔」，比事后回忆靠谱。")
+        return
+    for n in rows:
+        when = dt.datetime.fromtimestamp(n["at"]).strftime("%m-%d")
+        st.markdown(
+            f'<div style="padding:7px 0;border-bottom:1px dashed #ece7dd;">'
+            f'<div style="font-size:12.8px;line-height:1.65;">{theme.esc(n["text"][:90])}</div>'
+            f'<div style="font-size:11px;color:#a5adb2;margin-top:2px;">'
+            f'{when}　{theme.esc(n["kind"])}</div></div>',
+            unsafe_allow_html=True,
+        )
+
+
+def _projects(projects: list[dict]) -> None:
+    theme.section("在做的项目", "", "")
+    if not projects:
+        st.caption("还没有项目。项目把文献、里程碑和笔记绑在一个研究问题下。")
+        return
+    for p in projects:
+        st.markdown(
+            f'<div style="padding:9px 0;border-bottom:1px dashed #ece7dd;">'
+            f'<div style="display:flex;justify-content:space-between;gap:10px;">'
+            f'<div style="font-size:13.5px;font-weight:600;">{theme.esc(p["name"])}</div>'
+            f'<div style="font-size:11.5px;color:#8b9499;">{p["progress"]}%</div></div>'
+            f'<div style="font-size:12px;color:#6b767c;margin-top:2px;">'
+            f'{theme.esc((p["question"] or "未填写研究问题")[:48])}</div>'
+            f'<div class="sm-bar" style="margin-top:7px;"><i style="width:{p["progress"]}%"></i></div>'
+            f'</div>', unsafe_allow_html=True,
+        )
+
+
+def _activity(rows: list[dict]) -> None:
+    theme.section("最近操作", "", "")
+    if not rows:
+        st.caption("还没有记录。")
         return
     for r in rows:
         when = dt.datetime.fromtimestamp(r["at"]).strftime("%m-%d %H:%M")
-        tone = {"收藏": "ok", "笔记": "gold", "项目": "solid", "推荐": "solid"}.get(r["kind"], "")
         st.markdown(
-            f'<div style="display:flex;gap:10px;align-items:flex-start;padding:6px 0;'
-            f'border-bottom:1px dashed #ece7dd;">'
-            f'<div style="min-width:52px;font-size:11px;color:#a5adb2;'
-            f'font-variant-numeric:tabular-nums;padding-top:2px;">{when}</div>'
-            f'<div style="flex:1;font-size:13px;line-height:1.6;">{theme.pill(r["kind"], tone)}'
-            f'<span style="color:#3d4d56;">{theme.esc(r["detail"])}</span></div></div>',
-            unsafe_allow_html=True,
-        )
-
-
-def _projects_panel(projects: list[dict]) -> None:
-    theme.section("研究项目", "", "03")
-    if not projects:
-        st.caption("还没有项目。项目把文献、里程碑和笔记绑在一个研究问题下。")
-        if st.button("新建第一个项目", key="dash_new_proj"):
-            st.session_state["_goto"] = "研究项目"
-            st.rerun()
-        return
-    for p in projects:
-        pct = p["progress"]
-        st.markdown(
-            f'<div class="sm-card tight">'
-            f'<div style="display:flex;justify-content:space-between;gap:10px;">'
-            f'<div style="font-size:14px;font-weight:650;">{theme.esc(p["name"])}</div>'
-            f'<div style="font-size:11.5px;color:#6b767c;">{theme.esc(p["status"])}</div></div>'
-            f'<div style="font-size:12.5px;color:#6b767c;margin-top:3px;">'
-            f'{theme.esc(p["question"][:60]) if p["question"] else "未填写研究问题"}</div>'
-            f'<div class="sm-bar" style="margin-top:9px;"><i style="width:{pct}%"></i></div>'
-            f'<div style="display:flex;justify-content:space-between;font-size:11.5px;'
-            f'color:#8b9499;margin-top:5px;"><span>里程碑 {p["done"]}/{p["milestones"]}</span>'
-            f'<span>文献 {p["papers"]} · 笔记 {p["notes"]}</span></div></div>',
+            f'<div style="display:flex;gap:9px;padding:5px 0;font-size:12.5px;">'
+            f'<span style="color:#a5adb2;min-width:74px;font-variant-numeric:tabular-nums;">{when}</span>'
+            f'<span style="color:#8b9499;min-width:38px;">{theme.esc(r["kind"])}</span>'
+            f'<span style="color:#3d4d56;flex:1;">{theme.esc(r["detail"][:64])}</span></div>',
             unsafe_allow_html=True,
         )
 
 
 def _coverage(coverage: list[dict]) -> None:
-    theme.section("方向覆盖", "画像里每个方向在文献库中有多少篇 —— 哪个方向读得多，哪个还是空白。", "04")
     if not coverage:
-        st.caption("建立研究画像后，这里会显示每个方向的文献覆盖度。")
         return
+    theme.section("方向覆盖", "画像里的方向在库里的文献数，空白的地方值得先补。", "")
     for c in coverage:
         st.markdown(theme.bar(c["label"], c["share"], 100, "%"), unsafe_allow_html=True)
-        st.markdown(
-            f'<div style="font-size:11.5px;color:#8b9499;margin:-6px 0 10px;">{c["papers"]} 篇</div>',
-            unsafe_allow_html=True,
-        )
-
-
-def _trend(days: list[tuple[str, int]]) -> None:
-    import plotly.graph_objects as go
-
-    labels = [d[5:] for d, _ in days]
-    values = [c for _, c in days]
-    fig = go.Figure(go.Bar(x=labels, y=values, marker_color="#1f4e5f", marker_line_width=0))
-    fig.update_layout(height=150, margin=dict(l=0, r=0, t=6, b=0), showlegend=False,
-                      xaxis=dict(tickfont=dict(size=9)), yaxis=dict(showgrid=False, visible=False))
-    st.plotly_chart(theme.plotly_layout(fig, height=150), use_container_width=True,
-                    config={"displayModeBar": False})
 
 
 def render() -> None:
     data = stats.dashboard()
     lib = data["library"]
-    prof = data["profile"]
-
-    theme.hero(
-        f'{_greeting()}，这是你的研究工作台',
-        "左边是你要读的，中间是你在做的，右边是系统建议你关注的。"
-        "所有数字都来自本机文献库，不上传任何数据。",
-        "WORKBENCH · 工作台",
-    )
-
-    theme.stats([
-        ("文献库", str(lib["papers"]), "篇"),
-        ("在读", str(lib["reading"]), "篇"),
-        ("研究项目", str(data["project_stats"]["active"]), "个进行中"),
-        ("笔记", str(lib["notes"]), "条"),
-        ("连续使用", str(data["streak"]), "天"),
-    ])
 
     if not profile.is_ready() and lib["papers"] == 0:
-        _onboarding()
-        theme.section("最近活动", "", "05")
-        _activity_panel(data["activity"])
+        st.markdown(
+            '<div style="font-size:15px;line-height:1.9;max-width:640px;color:#3d4d56;margin-bottom:8px;">'
+            '第一次用的话，先做三件事：写一个研究方向、检索或导入一批文献、把它们放进一个项目。'
+            '之后这一页会变成你的日常视图。</div>',
+            unsafe_allow_html=True,
+        )
+        c1, c2, c3 = st.columns(3)
+        for col, (label, target) in zip((c1, c2, c3),
+                                        [("写研究方向", "研究画像"), ("检索文献", "文献检索"),
+                                         ("建项目", "研究项目")]):
+            with col:
+                if st.button(label, key=f"ob_{target}", use_container_width=True):
+                    st.session_state["_goto"] = target
+                    st.rerun()
+        if st.button("先载入演示数据", key="ob_demo"):
+            state.load_demo(seed_workspace=True)
+            st.rerun()
         return
 
-    left, right = st.columns([1.55, 1])
+    _masthead(data)
+    _today(data)
+
+    left, right = st.columns([1.5, 1])
     with left:
-        _queue(lib, data["queue"])
-        st.markdown("<div style='height:10px'></div>", unsafe_allow_html=True)
-        _projects_panel(data["projects"])
+        _queue(data["queue"])
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+        _projects(data["projects"])
+        st.markdown("<div style='height:12px'></div>", unsafe_allow_html=True)
+        _notes_panel()
     with right:
-        theme.section("研究画像", "", "A")
-        if prof["count"]:
-            st.markdown(theme.pills([i for i in prof["keywords"]][:10], "solid"),
-                        unsafe_allow_html=True)
-            st.markdown(
-                f'<div style="font-size:12.5px;color:#6b767c;margin:-2px 0 10px;">'
-                f'{prof["count"]} 个方向 · {prof["seeds"]} 篇种子文献</div>',
-                unsafe_allow_html=True,
-            )
-            if st.button("查看推荐 →", use_container_width=True, key="dash_rec"):
-                st.session_state["_goto"] = "推荐"
-                st.rerun()
-        else:
-            st.caption("还没有研究方向。建一个之后才能做个性化推荐。")
-            if st.button("去建画像", use_container_width=True, key="dash_profile"):
-                st.session_state["_goto"] = "研究画像"
-                st.rerun()
-
+        _activity(data["activity"])
         _coverage(data["coverage"])
+        if data["history"]:
+            theme.section("最近检索", "", "")
+            for h in data["history"][:3]:
+                st.markdown(
+                    f'<div style="font-size:12.3px;color:#4a5a63;padding:3px 0;">'
+                    f'{theme.esc(h["query"])}'
+                    f'<span style="color:#a5adb2;">　{h["n"]} 篇</span></div>',
+                    unsafe_allow_html=True,
+                )
 
-        theme.section("活跃度", "最近 14 天的操作次数。", "B")
-        _trend(data["activity_days"])
-
-        theme.section("最近活动", "", "C")
-        _activity_panel(data["activity"][:6])
-
-    theme.section("快捷入口", "", "05")
+    theme.section("", "", "")
     c1, c2, c3, c4, c5 = st.columns(5)
     for col, (label, target) in zip(
         (c1, c2, c3, c4, c5),
-        [("文献检索", "文献检索"), ("文献库", "文献库"), ("研究项目", "研究项目"),
-         ("缺口分析", "缺口与方向"), ("更新日志", "更新日志")],
+        [("检索", "文献检索"), ("推荐", "推荐"), ("文献库", "文献库"),
+         ("缺口分析", "缺口与方向"), ("设置", "设置")],
     ):
         with col:
-            if st.button(label, use_container_width=True, key=f"qa_{target}"):
+            if st.button(label, key=f"qa_{target}", use_container_width=True):
                 st.session_state["_goto"] = target
                 st.rerun()
-
-    if data["venues"]:
-        theme.section("常读来源", "", "06")
-        st.markdown(
-            theme.pills([f"{v} {n}" for v, n in data["venues"]], ""),
-            unsafe_allow_html=True,
-        )

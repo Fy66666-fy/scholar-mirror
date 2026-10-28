@@ -11,7 +11,7 @@ import re
 
 import streamlit as st
 
-from core import export, schema, summarize, templates
+from core import export, llm, schema, summarize, templates, translate
 from core import text as T
 from ui import state, theme
 
@@ -99,6 +99,8 @@ def _single(paper: dict, key_prefix: str = "") -> None:
             unsafe_allow_html=True,
         )
 
+    _llm_block(paper, summ)
+
     if not summ["has_abstract"]:
         theme.empty("这篇没有摘要", "多数 Crossref 记录与部分预印本不含摘要。可以打开原文页看，或换一个源。")
         return
@@ -142,6 +144,8 @@ def _single(paper: dict, key_prefix: str = "") -> None:
             label_visibility="collapsed",
         )
 
+    _translate_block(paper, summ)
+
     with st.expander("原文定位：每句话落在哪一栏", expanded=False):
         st.markdown(
             f'<div class="sm-abs" style="margin-bottom:8px;">{_highlight_numbers(paper.get("abstract") or "", summ["numbers"])}</div>',
@@ -157,6 +161,77 @@ def _single(paper: dict, key_prefix: str = "") -> None:
         c1.download_button("Markdown", md.encode("utf-8"), file_name="summary.md", use_container_width=True)
         c2.download_button("BibTeX", export.to_bibtex([paper]).encode("utf-8"),
                            file_name="paper.bib", use_container_width=True)
+
+
+def _translate_block(paper: dict, summ: dict) -> None:
+    """中文对照：按槽位逐句翻译，原文与译文并排，方便核对术语。"""
+    sid = paper.get("sid", "x")
+    with st.expander("中文对照（机翻，逐句核对）", expanded=False):
+        c1, c2 = st.columns([1, 3])
+        c1.caption(f"引擎：{translate.engine_label()}")
+        if c2.button("生成中文对照", key=f"tr_{sid}"):
+            with st.spinner("逐句翻译中…"):
+                out = {}
+                for slot in ("question", "method", "data", "findings", "conclusion", "limitation"):
+                    sents = [x["text"] for x in summ["slots"][slot]["sentences"]]
+                    out[slot] = [{"src": t, **translate.translate(t, "zh")} for t in sents]
+            st.session_state[f"tr_{sid}"] = out
+        res = st.session_state.get(f"tr_{sid}")
+        if not res:
+            st.caption("点击上面的按钮再翻译。整篇摘要也可以，但逐句对照更适合核对术语。")
+            return
+        for slot, items in res.items():
+            if not items:
+                continue
+            label = summ["slots"][slot]["label"]
+            st.markdown(f'<div class="sm-hint" style="margin-top:10px;">{theme.esc(label)}</div>',
+                        unsafe_allow_html=True)
+            for it in items:
+                if it.get("ok"):
+                    st.markdown(
+                        f'<div class="sm-slot" style="padding:10px 13px;">'
+                        f'<div style="font-size:12.5px;color:#6b767c;line-height:1.6;">'
+                        f'{theme.esc(it["src"])}</div>'
+                        f'<div style="font-size:13.5px;line-height:1.75;margin-top:5px;">'
+                        f'{theme.esc(it["text"])}</div></div>',
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(
+                        f'<div class="sm-slot empty"><div class="tx">{theme.esc(it["src"])}'
+                        f'（未翻译：{theme.esc(it.get("error") or "")}）</div></div>',
+                        unsafe_allow_html=True,
+                    )
+
+
+def _llm_block(paper: dict, summ: dict) -> None:
+    """可选的 LLM 深度总结。没配就直接说明，不假装有。"""
+    sid = paper.get("sid", "x")
+    if not llm.is_ready():
+        st.markdown(
+            f'<div class="sm-card flat"><div style="font-size:12.5px;color:#6b767c;line-height:1.7;">'
+            f'当前用本地抽取式摘要（不调用模型）。需要更连贯的中文段落时，可在「设置 → 模型与翻译」'
+            f'配置任意 OpenAI 兼容接口；配置后这里会出现「深度总结」按钮。</div></div>',
+            unsafe_allow_html=True,
+        )
+        return
+    c1, c2 = st.columns([1, 3])
+    if c1.button("LLM 深度总结", key=f"llm_{sid}"):
+        slots = {summ["slots"][k]["label"]: [x["text"] for x in summ["slots"][k]["sentences"]]
+                 for k in summ["slots"]}
+        with st.spinner("生成中…"):
+            text, err = llm.deep_summary(paper.get("title", ""), slots, summ.get("one_liner", ""))
+        st.session_state[f"llmres_{sid}"] = (text, err)
+    c2.caption(f"模型：{llm.model_name()}　·　只喂已抽取的原句，不允许补充事实")
+    res = st.session_state.get(f"llmres_{sid}")
+    if res:
+        text, err = res
+        if text:
+            st.markdown(
+                f'<div class="sm-card accent"><div style="font-size:14px;line-height:1.85;">'
+                f'{theme.esc(text)}</div></div>', unsafe_allow_html=True)
+        else:
+            st.warning(f"生成失败：{err}")
 
 
 def _pasted() -> None:

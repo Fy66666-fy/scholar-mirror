@@ -200,12 +200,13 @@ def load_demo(seed_workspace: bool = False) -> dict:
 
 
 def run_search(query: str, discipline: str, sources: list[str], per_source: int = 15,
-               year_from: int | None = None, oa_only: bool = False) -> dict:
+               year_from: int | None = None, oa_only: bool = False,
+               lang: str | None = None) -> dict:
     """检索 + 跨源去重 + 落状态。返回结果摘要，供页面提示用。"""
     from core.sources import search_all
 
     result = search_all(query, sources=sources, limit_per_source=per_source,
-                        year_from=year_from, oa_only=oa_only)
+                        year_from=year_from, oa_only=oa_only, lang=lang)
     dedup = D.dedupe_papers(result["papers"])
     set_results(
         query=query, discipline=discipline, papers=dedup["papers"],

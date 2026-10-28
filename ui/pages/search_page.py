@@ -23,8 +23,14 @@ def _search_form() -> None:
         per = c4.selectbox("每源条数", [10, 15, 25, 40], index=1)
         year_from = c5.number_input("起始年份", min_value=1950, max_value=2030, value=2015, step=1)
         oa_only = c6.checkbox("仅开放获取", value=False)
+        c7, c8 = st.columns([1, 3])
+        zh_mode = c7.checkbox("中文文献", value=False,
+                              help="给 PubMed / Europe PMC 加语言过滤，并同时查 ChinaXiv 中文预印本")
         hint = schema.DISCIPLINES.get(discipline, {}).get("hint", "")
-        if hint:
+        if zh_mode:
+            st.caption("中文模式：PubMed 限 chinese[la]，Europe PMC 限 LANG:chi，并启用 ChinaXiv。"
+                       "正式中文期刊（知网/万方）没有开放接口，请用文献库的导入通道。")
+        elif hint:
             st.caption(f"该学科建议：{hint}")
         submitted = st.form_submit_button("检索并合并", type="primary")
 
@@ -36,10 +42,12 @@ def _search_form() -> None:
         if not sources:
             st.warning("至少选择一个数据源。")
             return
+        if zh_mode and "chinaxiv" not in sources:
+            sources = sources + ["chinaxiv"]
         with st.spinner("并发检索中…（arXiv 有 3 秒/次的硬限速，稍等）"):
             info = state.run_search(q, discipline, sources, per_source=per,
                                     year_from=int(year_from) if year_from else None,
-                                    oa_only=oa_only)
+                                    oa_only=oa_only, lang="zh" if zh_mode else None)
         if info["unique"] == 0:
             st.error("没有结果。可以试试更通用的关键词，或勾选更多数据源。")
         else:

@@ -11,7 +11,7 @@ import time
 
 import streamlit as st
 
-from core import activity, db, http, library, profile, stats
+from core import activity, db, http, library, llm, profile, stats, translate
 from core.sources import SOURCE_INFO
 from ui import theme
 import version
@@ -86,6 +86,63 @@ def _defaults() -> None:
         theme.table(["域名", "成功", "缓存命中", "失败", "最近错误"], rows)
 
 
+def _model() -> None:
+    st_ = llm.status()
+    theme.stats([
+        ("模型状态", "已启用" if st_["ready"] else ("已关闭" if st_["on"] else "未配置"), ""),
+        ("模型", st_["model"], ""),
+        ("API Key", st_["key"], ""),
+        ("翻译引擎", translate.engine_label(), ""),
+    ])
+
+    theme.section("大模型（可选）", "接任意 OpenAI 兼容接口。不配置也能用：摘要、查重、聚类、缺口全部本地算。", "01")
+    theme.card(
+        '<div style="font-size:13px;line-height:1.8;color:#4a5a63;">'
+        '配置后多三个能力：<b>深度总结</b>（把六槽位原句串成一段中文）、'
+        '<b>更好的翻译</b>（术语与长句）、<b>缺口复核</b>（判断哪些缺口只是摘要没写）。<br>'
+        'Key 只存在本机 <code>data/mirror.db</code>，不进导出、不写日志。'
+        '使用第三方接口意味着摘要文本会发送到该服务商，这一点请自行判断。</div>',
+        tone="tight",
+    )
+    with st.form("llm_cfg"):
+        c1, c2 = st.columns([2, 1])
+        base = c1.text_input("Base URL", value=st_["base"],
+                             placeholder="https://api.openai.com/v1")
+        model = c2.text_input("模型名", value=st_["model"], placeholder="gpt-4o-mini")
+        key = st.text_input("API Key", value="", type="password",
+                            placeholder="留空表示不修改已保存的 Key")
+        on = st.checkbox("启用（关闭后所有功能回到本地算法）", value=st_["on"])
+        c3, c4, c5 = st.columns([1, 1, 2])
+        save_clicked = c3.form_submit_button("保存", type="primary", use_container_width=True)
+        test_clicked = c4.form_submit_button("测试连接", use_container_width=True)
+    if save_clicked:
+        llm.save(base, key, model, on)
+        st.success("已保存")
+        st.rerun()
+    if test_clicked:
+        with st.spinner("请求中…"):
+            ok, msg = llm.test()
+        (st.success if ok else st.error)(msg)
+
+    if st.button("清除模型配置"):
+        llm.clear()
+        st.success("已清除")
+        st.rerun()
+
+    theme.section("翻译", "默认走 MyMemory 免费接口（按句翻译、7 天缓存）；配了模型可以切过去。", "02")
+    mode = library.get_kv("translate_engine", "auto")
+    options = {"auto": "自动（有 LLM 用 LLM，否则 MyMemory）",
+               "mymemory": "只用 MyMemory（免费，质量一般）",
+               "llm": "只用 LLM（需要配置）",
+               "off": "关闭翻译"}
+    pick = st.radio("翻译引擎", list(options), index=list(options).index(mode) if mode in options else 0,
+                    format_func=lambda k: options[k], horizontal=False)
+    if pick != mode:
+        library.set_kv("translate_engine", pick)
+        st.rerun()
+    st.caption("中文对照在「摘要工坊 → 单篇深读」里，按句生成，原文与译文并排。")
+
+
 def _about() -> None:
     theme.section("它是什么", "", "05")
     theme.card(
@@ -146,10 +203,12 @@ def render() -> None:
         "数据管理、默认值与产品说明。所有数据都在本机，卸载即删除。",
         "SETTINGS · 设置",
     )
-    tab1, tab2, tab3 = st.tabs(["数据与缓存", "默认值与数据源", "关于"])
+    tab1, tab2, tab3, tab4 = st.tabs(["数据与缓存", "默认值与数据源", "模型与翻译", "关于"])
     with tab1:
         _data()
     with tab2:
         _defaults()
     with tab3:
+        _model()
+    with tab4:
         _about()
