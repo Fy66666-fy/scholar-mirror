@@ -35,6 +35,16 @@ Windows 双击 `启动.bat`（自动找解释器、缺依赖自动装）。默�
 
 ---
 
+## 部署到线上
+
+GitHub 仓库：<https://github.com/Fy66666-fy/scholar-mirror>
+
+- **Streamlit Community Cloud**：New app → 选仓库 → 主文件 `app.py` → Secrets 里加 `public_demo = true`
+  （开启后每个访客一个独立库，自动载入演示数据）。详细步骤见 [DEPLOY.md](DEPLOY.md)。
+- **自建 / Docker**：`SM_PUBLIC_DEMO=1 python serve.py`，读取 `$PORT`。
+
+---
+
 ## 十三个页面
 
 ### 研究
