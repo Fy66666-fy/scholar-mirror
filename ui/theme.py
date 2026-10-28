@@ -53,6 +53,20 @@ section[data-testid="stSidebar"] .stRadio label,
 section[data-testid="stSidebar"] .stSelectbox label{color:#b9c9cf !important;}
 section[data-testid="stSidebar"] hr{border-color:#2c5867;}
 
+/* 侧边栏导航按钮：做成「导航链接」而不是按钮 */
+section[data-testid="stSidebar"] .stButton>button{
+  background:transparent; border:1px solid transparent; color:#c9d8de !important;
+  text-align:left; justify-content:flex-start; font-weight:500; font-size:13.5px;
+  padding:7px 11px; border-radius:8px; min-height:0;
+}
+section[data-testid="stSidebar"] .stButton>button:hover{
+  background:rgba(255,255,255,.07); border-color:transparent; color:#fff !important;
+}
+section[data-testid="stSidebar"] .stButton>button[kind="primary"]{
+  background:#2b6577; border-color:#2b6577; color:#fff !important; font-weight:650;
+}
+section[data-testid="stSidebar"] .stButton>button p{font-size:13.5px;}
+
 /* 标题 */
 .sm-hero{padding: 6px 0 18px 0; border-bottom:1px solid var(--line); margin-bottom:22px;}
 .sm-kicker{font-size:12px; letter-spacing:.18em; text-transform:uppercase; color:var(--gold); font-weight:600;}

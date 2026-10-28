@@ -58,6 +58,8 @@ def set_results(*, query: str, discipline: str, papers: list[dict], status: list
     st.session_state["analysis"] = None
     st.session_state["analysis_sig"] = ""
     library.add_history(query, discipline, sources_used, len(papers))
+    from core import activity
+    activity.log("检索", f"「{query}」→ {len(papers)} 篇（合并 {merged} 条重复）")
 
 
 def papers() -> list[dict]:

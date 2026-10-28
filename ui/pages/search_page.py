@@ -93,16 +93,17 @@ def _paper_block(p: dict, idx: int) -> None:
         st.markdown(theme.paper_row(p, abstract_chars=300, badges=badges), unsafe_allow_html=True)
     with c2:
         saved = library.has(sid)
-        if st.button("已收藏" if saved else "收藏", key=f"fav_{sid}", use_container_width=True):
+        if st.button("已收藏" if saved else "收藏", key=f"fav_{sid}_{idx}", use_container_width=True):
             if not saved:
                 library.save([p], group=st.session_state.get("query", "未分组")[:24] or "未分组")
                 st.toast("已加入文献库")
             else:
                 st.toast("已在文献库中")
-        if st.button("摘要", key=f"sum_{sid}", use_container_width=True):
-            st.session_state[f"open_{sid}"] = not st.session_state.get(f"open_{sid}", False)
+        if st.button("摘要", key=f"sum_{sid}_{idx}", use_container_width=True):
+            k = f"open_{sid}_{idx}"
+            st.session_state[k] = not st.session_state.get(k, False)
 
-    if st.session_state.get(f"open_{sid}"):
+    if st.session_state.get(f"open_{sid}_{idx}"):
         s = summarize.structured(p)
         cols = st.columns(2)
         for i, slot in enumerate(("question", "method", "findings", "conclusion")):

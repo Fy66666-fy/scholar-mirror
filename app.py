@@ -1,4 +1,4 @@
-"""文献镜像 ScholarMirror —— 跨学科文献摘要与关联分析系统。
+"""文献镜像 ScholarMirror —— 跨学科文献研究工作台。
 
 入口只做三件事：页面配置、侧边栏导航、按路由分发。
 所有业务逻辑都在 core/ 里，页面在 ui/pages/ 里，互不依赖。
@@ -21,38 +21,46 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from core import library  # noqa: E402
+from core import library, profile  # noqa: E402
 from ui import state, theme  # noqa: E402
-from ui.pages import cluster_page, dedupe_page, gaps_page, graph_page, home, library_page, search_page, summary_page  # noqa: E402
+from ui.pages import (  # noqa: E402
+    changelog_page, cluster_page, dashboard, dedupe_page, gaps_page,
+    graph_page, library_page, profile_page, projects_page, recommend_page,
+    search_page, settings_page, summary_page,
+)
+import version  # noqa: E402
+
+# 分组只是为了「找得到」，路由仍是扁平字典
+GROUPS: list[tuple[str, list[str]]] = [
+    ("研究", ["工作台", "文献检索", "摘要工坊", "文献库", "研究项目", "推荐", "研究画像"]),
+    ("分析", ["查重中心", "关联图谱", "主题聚类", "缺口与方向"]),
+    ("系统", ["更新日志", "设置"]),
+]
 
 PAGES = {
-    "首页": ("bi-house-door", home.render),
-    "文献检索": ("bi-search", search_page.render),
-    "摘要工坊": ("bi-file-earmark-text", summary_page.render),
-    "查重中心": ("bi-shield-check", dedupe_page.render),
-    "关联图谱": ("bi-diagram-3", graph_page.render),
-    "主题聚类": ("bi-grid-3x3-gap", cluster_page.render),
-    "缺口与方向": ("bi-compass", gaps_page.render),
-    "我的文献库": ("bi-collection", library_page.render),
+    "工作台": dashboard.render,
+    "文献检索": search_page.render,
+    "摘要工坊": summary_page.render,
+    "文献库": library_page.render,
+    "研究项目": projects_page.render,
+    "推荐": recommend_page.render,
+    "研究画像": profile_page.render,
+    "查重中心": dedupe_page.render,
+    "关联图谱": graph_page.render,
+    "主题聚类": cluster_page.render,
+    "缺口与方向": gaps_page.render,
+    "更新日志": changelog_page.render,
+    "设置": settings_page.render,
 }
 
-_MENU_STYLE = {
-    "container": {"padding": "0", "background-color": "transparent"},
-    "icon": {"color": "#8fb0bb", "font-size": "15px"},
-    "nav-link": {
-        "font-size": "14px", "text-align": "left", "margin": "2px 0",
-        "padding": "9px 12px", "border-radius": "9px", "color": "#dbe6ea",
-        "--hover-color": "rgba(255,255,255,.07)",
-    },
-    "nav-link-selected": {"background-color": "#2b6577", "color": "#ffffff", "font-weight": "600"},
-}
+DEFAULT_PAGE = "工作台"
 
 
 def _sidebar() -> str:
     with st.sidebar:
         st.markdown(
             """
-            <div style="padding:6px 2px 14px;">
+            <div style="padding:4px 2px 12px;">
               <div style="display:flex;align-items:center;gap:9px;">
                 <div style="width:30px;height:30px;border-radius:8px;background:#2b6577;
                      display:flex;align-items:center;justify-content:center;color:#fff;
@@ -68,56 +76,35 @@ def _sidebar() -> str:
         )
 
         pending = st.session_state.pop("_goto", None)
-        names = list(PAGES)
-        if pending in names:
+        if pending in PAGES:
             st.session_state["nav"] = pending
+        current = st.session_state.get("nav", DEFAULT_PAGE)
+        if current not in PAGES:
+            current = DEFAULT_PAGE
 
-        try:
-            from streamlit_option_menu import option_menu
-            page = option_menu(
-                None, names,
-                icons=[PAGES[n][0] for n in names],
-                default_index=0,
-                styles=_MENU_STYLE,
-                key="nav",
-                menu_icon="cast",
+        for group, items in GROUPS:
+            st.markdown(
+                f'<div style="font-size:10.5px;letter-spacing:.14em;color:#7fa3b0;'
+                f'margin:12px 0 3px 4px;">{group.upper()}</div>',
+                unsafe_allow_html=True,
             )
-        except Exception:  # 插件缺失时降级为原生单选，不影响功能
-            page = st.radio("导航", names, key="nav", label_visibility="collapsed")
+            for name in items:
+                if st.button(name, key=f"nav_{name}", use_container_width=True,
+                             type="primary" if name == current else "secondary"):
+                    st.session_state["nav"] = name
+                    st.rerun()
 
-        st.markdown("<div style='height:14px'></div>", unsafe_allow_html=True)
-        st.markdown(
-            "<div style='font-size:11px;color:#8fb0bb;letter-spacing:.08em;'>当前数据池</div>",
-            unsafe_allow_html=True,
-        )
+        st.markdown("<hr style='margin:14px 0 10px;'>", unsafe_allow_html=True)
         ps = state.papers()
-        if ps:
-            years = [p["year"] for p in ps if p.get("year")]
-            st.markdown(
-                f"<div style='font-size:12.5px;color:#dbe6ea;line-height:1.9;'>"
-                f"文献 {len(ps)} 篇<br>"
-                f"年份 {min(years) if years else '—'}–{max(years) if years else '—'}<br>"
-                f"主题 {state.analysis()['cluster']['k']} 个方向</div>",
-                unsafe_allow_html=True,
-            )
-        else:
-            st.markdown(
-                "<div style='font-size:12.5px;color:#8fb0bb;line-height:1.9;'>"
-                "还没有检索结果<br>从「文献检索」开始</div>",
-                unsafe_allow_html=True,
-            )
-
-        st.markdown("<hr style='margin:16px 0 12px;'>", unsafe_allow_html=True)
-        try:
-            n = library.stats()["papers"]
-        except Exception:
-            n = 0
+        n_lib = library.stats()["papers"]
+        n_int = len(profile.list_interests())
         st.markdown(
-            f"<div style='font-size:11.5px;color:#8fb0bb;line-height:1.8;'>"
-            f"本地文献库 {n} 篇<br>数据源 6 个 · 全离线算法</div>",
+            f"<div style='font-size:11.5px;color:#8fb0bb;line-height:1.9;'>"
+            f"文献池 {len(ps)} 篇<br>文献库 {n_lib} 篇 · 方向 {n_int} 个<br>"
+            f"v{version.__version__} · 全离线算法</div>",
             unsafe_allow_html=True,
         )
-    return page
+    return current
 
 
 def main() -> None:
@@ -134,8 +121,7 @@ def main() -> None:
         pass
 
     page = _sidebar()
-    render = PAGES.get(page, PAGES["首页"])[1]
-    render()
+    PAGES.get(page, PAGES[DEFAULT_PAGE])()
 
     st.markdown(
         '<div class="sm-foot">文献镜像 ScholarMirror · 抽取式摘要与关联分析 · '
