@@ -12,8 +12,10 @@ _URL = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
 
 
 def search(query: str, *, limit: int = 25, year_from: int | None = None,
-           oa_only: bool = False, **_) -> list[dict]:
+           oa_only: bool = False, lang: str | None = None, **_) -> list[dict]:
     q = query
+    if lang == "zh":
+        q += ' AND LANG:"chi"'
     if year_from:
         q += f" AND (FIRST_PDATE:[{year_from}-01-01 TO 3000-12-31])"
     if oa_only:

@@ -261,7 +261,11 @@ def normalize_paper(raw: dict) -> dict:
         p["year"] = int(p["year"]) if p.get("year") else None
     except (TypeError, ValueError):
         p["year"] = None
-    p["lang"] = p.get("lang") or T.detect_lang(p["title"] + " " + p["abstract"])
+    # 注意：不能读 p["lang"]，empty_paper 里的默认值 "en" 会把语种判定整个短路掉
+    given_lang = str(raw.get("lang") or "").strip().lower()
+    p["lang"] = given_lang if given_lang in ("zh", "en") else T.detect_lang(
+        p["title"] + " " + p["abstract"]
+    )
     # 适配器若已给出明确设计就沿用；"unknown" 是默认值，必须走一次判定
     given = p.get("design")
     p["design"] = given if (given in DESIGN_LABELS and given != "unknown") else classify_design(

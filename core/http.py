@@ -133,6 +133,36 @@ def get_json(url: str, *, params: dict | None = None, ttl_kind: str = "search",
     return None
 
 
+def post_json(url: str, payload: dict, *, ttl_kind: str = "search", timeout: float = 30.0,
+              retries: int = 2, headers: dict | None = None):
+    """POST JSON。ChinaXiv 的检索接口只收 POST，GET 会返回 400。"""
+    key = "post|" + url + "|" + json.dumps(payload, sort_keys=True, ensure_ascii=False)
+    cached = _read_cache(key, TTL.get(ttl_kind, 600))
+    if cached is not None:
+        _record(_host(url), "cache")
+        return cached
+    host = _host(url)
+    for attempt in range(retries + 1):
+        try:
+            _throttle(host)
+            resp = requests.post(url, json=payload,
+                                 headers={**HEADERS, **(headers or {})}, timeout=timeout)
+            if resp.status_code in (429, 500, 502, 503, 504) and attempt < retries:
+                time.sleep(min(1.5 * (2 ** attempt), 8.0))
+                continue
+            resp.raise_for_status()
+            data = resp.json()
+            _write_cache(key, data)
+            _record(host, "ok")
+            return data
+        except Exception as exc:  # noqa: BLE001
+            if attempt >= retries:
+                _record(host, "fail", f"{type(exc).__name__}: {exc}")
+                return None
+            time.sleep(min(1.5 * (2 ** attempt), 6.0))
+    return None
+
+
 def get_text(url: str, *, params: dict | None = None, ttl_kind: str = "search",
              timeout: float = 25.0, retries: int = 2, headers: dict | None = None) -> str | None:
     key = "text|" + url + "|" + json.dumps(params or {}, sort_keys=True, ensure_ascii=False)

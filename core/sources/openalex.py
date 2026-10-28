@@ -61,8 +61,10 @@ def _keywords(work: dict) -> list[str]:
 
 
 def search(query: str, *, limit: int = 25, year_from: int | None = None,
-           oa_only: bool = False, **_) -> list[dict]:
+           oa_only: bool = False, lang: str | None = None, **_) -> list[dict]:
     filters = []
+    if lang == "zh":
+        filters.append("language:zh")
     if year_from:
         filters.append(f"from_publication_date:{year_from}-01-01")
     if oa_only:

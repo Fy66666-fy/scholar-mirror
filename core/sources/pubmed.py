@@ -41,8 +41,10 @@ def _year(art: ET.Element) -> int | None:
 
 
 def search(query: str, *, limit: int = 25, year_from: int | None = None,
-           oa_only: bool = False, **_) -> list[dict]:
+           oa_only: bool = False, lang: str | None = None, **_) -> list[dict]:
     term = query
+    if lang == "zh":
+        term += " AND chinese[la]"
     if year_from:
         term += f' AND ("{year_from}"[Date - Publication] : "3000"[Date - Publication])'
     if oa_only:

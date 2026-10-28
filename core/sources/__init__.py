@@ -18,7 +18,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from core import schema
-from core.sources import arxiv, crossref, europepmc, openalex, pubmed, semantic
+from core.sources import arxiv, chinaxiv, crossref, europepmc, openalex, pubmed, semantic
 
 ADAPTERS = {
     "openalex": openalex.search,
@@ -27,6 +27,7 @@ ADAPTERS = {
     "pubmed": pubmed.search,
     "europepmc": europepmc.search,
     "semantic": semantic.search,
+    "chinaxiv": chinaxiv.search,
 }
 
 SOURCE_INFO = {
@@ -64,6 +65,12 @@ SOURCE_INFO = {
         "label": "Semantic Scholar",
         "desc": "带 TLDR 一句话摘要与引用网络（匿名配额较紧）",
         "strength": "语义摘要",
+        "key": False,
+    },
+    "chinaxiv": {
+        "label": "ChinaXiv",
+        "desc": "中科院中文预印本平台，免注册；正式中文期刊需靠 Crossref 或自行导入",
+        "strength": "中文文献",
         "key": False,
     },
 }
@@ -105,7 +112,7 @@ def build_query(query: str, source: str) -> str:
 
 def search_all(query: str, *, sources: list[str] | None = None, limit_per_source: int = 20,
                year_from: int | None = None, oa_only: bool = False,
-               on_progress=None) -> dict:
+               lang: str | None = None, on_progress=None) -> dict:
     """并发检索。返回 {'papers': [...], 'status': [...], 'elapsed': float}。
 
     papers 尚未去重 —— 去重是独立的一步（core.dedupe），因为用户可能想
@@ -127,6 +134,7 @@ def search_all(query: str, *, sources: list[str] | None = None, limit_per_source
                 limit=limit_per_source,
                 year_from=year_from,
                 oa_only=oa_only,
+                lang=lang,
             )
             return src, res or [], "", time.time() - t0
         except Exception as exc:  # noqa: BLE001 - 适配器内部异常一律降级

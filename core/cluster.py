@@ -141,6 +141,8 @@ def _distinctive_terms(papers: list[dict], members: list[int], feats: dict, top:
             continue
         if len(stem) <= 2 and stem.isascii():
             continue
+        if stem.lower() in _LABEL_BLOCK:
+            continue
         seen.add(stem)
         out.append(surfaces.get(stem, stem))
         if len(out) >= top:
@@ -148,15 +150,32 @@ def _distinctive_terms(papers: list[dict], members: list[int], feats: dict, top:
     return out
 
 
+# MeSH 的 check tag 与学科分类里的泛词，当方向名毫无信息量
+_LABEL_BLOCK = {
+    "humans", "animals", "male", "female", "adult", "aged", "middle aged",
+    "young adult", "adolescent", "child", "child, preschool", "infant",
+    "mice", "rats", "dogs", "pregnancy", "retrospective studies",
+    "prospective studies", "risk factors", "treatment outcome", "time factors",
+    "research", "study", "studies", "review", "analysis", "method", "methods",
+    "model", "models", "effect", "effects", "application", "case", "results",
+    "人类", "动物", "综述", "研究", "应用", "影响", "分析", "方法", "进展",
+}
+
+
 def _label_candidates(papers: list[dict], members: list[int], others: list[int], top: int = 3) -> list[str]:
     """优先用作者关键词 / 主题标签命名：它们是人写的，比抽出来的词更像「方向名」。"""
-    def freq(idxs: list[int]) -> dict[str, int]:
-        c: dict[str, int] = {}
+    def freq(idxs: list[int]) -> dict[str, float]:
+        """作者关键词比学科分类更能代表方向，权重 1.0 : 0.4。"""
+        c: dict[str, float] = {}
         for i in idxs:
-            for k in (papers[i].get("keywords") or []) + (papers[i].get("fields") or []):
+            for k in (papers[i].get("keywords") or []):
                 k = str(k).strip()
                 if 3 <= len(k) <= 40:
-                    c[k] = c.get(k, 0) + 1
+                    c[k] = c.get(k, 0.0) + 1.0
+            for k in (papers[i].get("fields") or []):
+                k = str(k).strip()
+                if 3 <= len(k) <= 40:
+                    c[k] = c.get(k, 0.0) + 0.4
         return c
 
     inside = freq(members)
@@ -166,9 +185,14 @@ def _label_candidates(papers: list[dict], members: list[int], others: list[int],
     code_re = re.compile(r"^[a-z\-]{2,12}(\.[A-Za-z]{2})?$")
     scored = []
     for term, cnt in inside.items():
-        if cnt < max(2, int(0.3 * n_in)):
+        if cnt < max(1.5, 0.3 * n_in):
             continue
-        if code_re.match(term) or len(term) < 4:
+        if code_re.match(term) or term.strip().lower() in _LABEL_BLOCK:
+            continue
+        # 中文三字词（微塑料、土壤微生物）是正常词长，不能按英文的 4 字符门槛过滤
+        if term.isascii() and len(term) < 4:
+            continue
+        if not term.isascii() and len(term) < 3:
             continue
         in_ratio = cnt / n_in
         out_ratio = outside.get(term, 0) / n_out

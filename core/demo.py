@@ -204,6 +204,35 @@ _RAW = [
         "cited_by": 88, "keywords": ["remote teaching", "qualitative", "digital equity", "teachers"],
         "is_oa": True, "type": "article", "sources": ["crossref", "openalex"],
     },
+    {
+        "title": "微塑料对农田土壤微生物群落结构的影响：基于 90 天培养实验",
+        "abstract": (
+            "目的：探讨聚乙烯微塑料对农田土壤微生物群落结构与氮循环功能的影响。"
+            "方法：采集华北平原农田表层土壤，设置 0%、1%、5%（w/w）三个浓度处理，"
+            "在 25 摄氏度下培养 90 天，采用高通量测序测定细菌群落组成，并测定脲酶与蛋白酶活性。"
+            "结果：5% 处理组 Shannon 指数下降 0.42（P<0.01），变形菌门相对丰度降低 12.3%，"
+            "脲酶活性下降 23%。结论：高浓度微塑料会显著降低土壤微生物多样性与氮周转能力。"
+            "局限：培养周期较短，且只设置了一种土壤质地，结论外推需谨慎。"
+        ),
+        "authors": ["张伟", "李娜", "王强"],
+        "year": 2025, "venue": "环境科学", "doi": "10.1000/demo.601",
+        "cited_by": 12, "keywords": ["微塑料", "土壤微生物", "高通量测序", "氮循环"],
+        "is_oa": True, "type": "article", "sources": ["chinaxiv", "crossref"],
+    },
+    {
+        "title": "血浆 p-tau217 在阿尔茨海默病早期筛查中的诊断价值",
+        "abstract": (
+            "目的：评估血浆磷酸化 tau217（p-tau217）在轻度认知障碍人群中筛查淀粉样蛋白病理的价值。"
+            "方法：纳入 312 例来自三家记忆门诊的受试者，随访 24 个月，以淀粉样蛋白 PET 为参照标准，"
+            "采用化学发光法测定血浆 p-tau217。结果：p-tau217 判别淀粉样蛋白阳性的曲线下面积为 0.91"
+            "（95%CI 0.87–0.95），灵敏度 86%、特异度 84%，均优于血浆 p-tau181。"
+            "结论：p-tau217 可作为基层筛查的分流指标。局限：单中心实验室检测，随访时间较短。"
+        ),
+        "authors": ["陈晓", "刘洋", "赵敏"],
+        "year": 2024, "venue": "中华神经科杂志", "doi": "10.1000/demo.602",
+        "cited_by": 34, "keywords": ["阿尔茨海默病", "p-tau217", "血液标志物", "筛查"],
+        "is_oa": False, "type": "article", "sources": ["pubmed", "chinaxiv"],
+    },
     # 同一条记录的另一个源版本：用来演示「跨源合并」把两条并成一条
     {
         "title": "Plasma p-tau217 predicts amyloid status in memory clinic cohorts",
@@ -231,6 +260,6 @@ def meta() -> dict:
         "query": "演示数据集（跨学科 12 篇）",
         "discipline": "通用 / 跨学科",
         "sources": ["pubmed", "europepmc", "openalex", "crossref", "arxiv", "semantic"],
-        "raw_count": 13,
+        "raw_count": 15,
         "year_from": 2021,
     }
