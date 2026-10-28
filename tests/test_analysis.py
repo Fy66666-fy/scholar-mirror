@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core import cluster, dedupe, export, gaps, library, related, schema  # noqa: E402
+from core import cluster, db, dedupe, export, gaps, library, related, schema  # noqa: E402
 
 TOPICS = {
     "ad": [
@@ -182,7 +182,7 @@ def test_report_markdown_contains_sections():
 
 
 def test_library_roundtrip(tmp_path, monkeypatch):
-    monkeypatch.setattr(library, "DB_PATH", tmp_path / "t.db")
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
     ps = _build("ad")[:2]
     assert library.save(ps, group="AD", tags="biomarker") == 2
     assert library.save(ps, group="AD", tags="imaging") == 0
