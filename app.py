@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -21,7 +22,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from core import library, profile  # noqa: E402
+from core import db, library, profile  # noqa: E402
 from ui import state, theme  # noqa: E402
 from ui.pages import (  # noqa: E402
     changelog_page, cluster_page, dashboard, dedupe_page, gaps_page,
@@ -56,6 +57,25 @@ PAGES = {
 DEFAULT_PAGE = "工作台"
 
 
+def public_demo() -> bool:
+    """公开演示模式：每个浏览器会话一个独立库，自动载入演示数据。"""
+    if os.environ.get("SM_PUBLIC_DEMO") == "1":
+        return True
+    try:
+        return bool(st.secrets.get("public_demo", False))
+    except Exception:
+        return False
+
+
+def _session_id() -> str:
+    try:
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        ctx = get_script_run_ctx()
+        return getattr(ctx, "session_id", "") or "anon"
+    except Exception:
+        return "anon"
+
+
 def _sidebar() -> str:
     with st.sidebar:
         st.markdown(
@@ -81,6 +101,15 @@ def _sidebar() -> str:
         current = st.session_state.get("nav", DEFAULT_PAGE)
         if current not in PAGES:
             current = DEFAULT_PAGE
+
+        if st.session_state.get("_public_demo"):
+            st.markdown(
+                '<div style="background:rgba(255,255,255,.06);border:1px solid #2c5867;'
+                'border-radius:8px;padding:7px 9px;font-size:11px;color:#b9c9cf;line-height:1.6;'
+                'margin-bottom:4px;">公开演示版<br>'
+                '数据只存在本次会话，关闭页面即清空；检索会真实访问外部数据源。</div>',
+                unsafe_allow_html=True,
+            )
 
         for group, items in GROUPS:
             st.markdown(
@@ -109,6 +138,10 @@ def _sidebar() -> str:
 
 def main() -> None:
     theme.inject()
+    is_public = public_demo()
+    if is_public:
+        db.set_scope(_session_id())
+
     state.init()
 
     # ?demo=1 只载入演示文献池；?demo=full 额外写入示例文献库/画像/项目
@@ -118,6 +151,12 @@ def main() -> None:
             state.load_demo(seed_workspace=demo_mode == "full")
             st.session_state["_demo_loaded"] = True
             st.session_state["_goto"] = "工作台" if demo_mode == "full" else "文献检索"
+        elif is_public and not st.session_state.get("_demo_loaded"):
+            # 公开演示：新会话直接给一套完整示例，否则首屏是空的
+            state.load_demo(seed_workspace=True)
+            st.session_state["_demo_loaded"] = True
+            st.session_state["_public_demo"] = True
+            db.prune_sessions(keep=40)
     except Exception:
         pass
 

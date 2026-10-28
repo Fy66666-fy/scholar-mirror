@@ -12,11 +12,50 @@ schema，迁移就会变成灾难。
 """
 from __future__ import annotations
 
+import os
+import re
 import sqlite3
 from pathlib import Path
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "mirror.db"
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+# 公开演示模式下，每个浏览器会话一个独立库文件，避免陌生人互相污染。
+# 由 app.py 在渲染前调用 set_scope()；本地使用时不会触发。
+_SCOPE = ""
+
+
+def set_scope(scope: str) -> Path:
+    """把库切到 data/sessions/<scope>.db。返回新路径。"""
+    global DB_PATH, _SCOPE
+    safe = re.sub(r"[^0-9a-zA-Z_-]", "", scope or "")[:40]
+    if not safe:
+        return DB_PATH
+    _SCOPE = safe
+    root = DB_PATH.parent / "sessions"
+    root.mkdir(parents=True, exist_ok=True)
+    DB_PATH = root / f"{safe}.db"
+    return DB_PATH
+
+
+def scope() -> str:
+    return _SCOPE
+
+
+def prune_sessions(keep: int = 40) -> int:
+    """只保留最近的 N 个会话库，防止公开演示把磁盘占满。"""
+    root = Path(__file__).resolve().parent.parent / "data" / "sessions"
+    if not root.exists():
+        return 0
+    files = sorted(root.glob("*.db"), key=lambda p: p.stat().st_mtime, reverse=True)
+    removed = 0
+    for f in files[keep:]:
+        try:
+            f.unlink()
+            removed += 1
+        except OSError:
+            pass
+    return removed
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS papers (
