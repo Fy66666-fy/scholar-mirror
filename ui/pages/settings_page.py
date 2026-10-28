@@ -133,7 +133,7 @@ def _about() -> None:
     theme.section("版本", "", "08")
     st.markdown(
         f'<div style="font-size:13px;color:#4a5a63;line-height:1.9;">'
-        f'v{version.__version__}（{version.__codename__}）· {version.__release_date__}<br>'
+        f'{version.label()} · 构建 {version.__build__}<br>'
         f'与 med-lit-system 的关系：复用其摘要与请求层思路，新增学科模板层、查重、图谱、'
         f'聚类、缺口、画像与推荐。两者互不依赖。</div>',
         unsafe_allow_html=True,

@@ -101,7 +101,7 @@ def _sidebar() -> str:
         st.markdown(
             f"<div style='font-size:11.5px;color:#8fb0bb;line-height:1.9;'>"
             f"文献池 {len(ps)} 篇<br>文献库 {n_lib} 篇 · 方向 {n_int} 个<br>"
-            f"v{version.__version__} · 全离线算法</div>",
+            f"{version.label()} · 全离线算法</div>",
             unsafe_allow_html=True,
         )
     return current

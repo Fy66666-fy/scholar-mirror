@@ -8,7 +8,7 @@
 建画像 → 检索/导入 → 结构化摘要 → 查重 → 关联与聚类 → 缺口与方向 → 推荐 → 项目与写作 → 导出
 ```
 
-当前版本 **v0.2.0 (Workbench)**，路线图见 [ROADMAP.md](ROADMAP.md)，变更见 [CHANGELOG.md](CHANGELOG.md)。
+**状态：开发版（未发布）** —— 版本号在首个公开版本发布时确定。路线图见 [ROADMAP.md](ROADMAP.md)，变更见 [CHANGELOG.md](CHANGELOG.md)。
 
 ---
 

@@ -181,10 +181,10 @@ def test_importer_auto_detect():
 
 def test_changelog_parse():
     rels = changelog.parse()
-    assert rels and rels[0]["version"] == "0.2.0"
-    assert any(s["title"] == "新增" for s in rels[0]["sections"])
+    assert rels and rels[0]["version"].lower() == "unreleased"
+    assert any(s["title"].startswith("新增") for s in rels[0]["sections"])
     assert changelog.tone("修复") == "warn"
-    assert changelog.stats()["releases"] >= 2
+    assert changelog.stats()["releases"] >= 1
 
 
 def test_recommend_score_prefers_matching_topic(fresh_db, papers):

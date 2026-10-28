@@ -12,11 +12,16 @@ import version
 ROADMAP = Path(__file__).resolve().parent.parent.parent / "ROADMAP.md"
 
 
+def _ver_label(v: str) -> str:
+    return "未发布（Unreleased）" if str(v).lower() == "unreleased" else f"v{v}"
+
+
 def _release(rel: dict, latest: bool) -> None:
-    tag = theme.pill("当前版本", "ok") if latest else ""
+    is_dev = str(rel["version"]).lower() == "unreleased"
+    tag = theme.pill("开发中", "warn") if (latest and is_dev) else (theme.pill("当前版本", "ok") if latest else "")
     st.markdown(
         f'<div style="display:flex;align-items:center;gap:10px;margin:22px 0 6px;">'
-        f'<span style="font-size:22px;font-weight:700;letter-spacing:-.02em;">v{theme.esc(rel["version"])}</span>'
+        f'<span style="font-size:22px;font-weight:700;letter-spacing:-.02em;">{_ver_label(rel["version"])}</span>'
         f'<span style="font-size:12.5px;color:#8b9499;">{theme.esc(rel["date"])}</span>{tag}</div>',
         unsafe_allow_html=True,
     )
@@ -46,8 +51,8 @@ def render() -> None:
     rels = changelog.parse()
     stt = changelog.stats()
     theme.stats([
-        ("当前版本", f'v{version.__version__}', ""),
-        ("代号", version.__codename__, ""),
+        ("版本状态", version.label(), ""),
+        ("构建日期", version.__build__, ""),
         ("发布次数", str(stt["releases"]), "次"),
         ("变更条目", str(stt["items"]), "条"),
     ])

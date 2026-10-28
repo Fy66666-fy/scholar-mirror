@@ -1,16 +1,23 @@
-"""版本号唯一来源。更新日志见 CHANGELOG.md，阶段规划见 ROADMAP.md。"""
+"""版本信息。
 
-__version__ = "0.2.0"
-__release_date__ = "2026-10-28"
-__codename__ = "Workbench"
+首个公开版本发布前不预设版本号：开发期的 0.0.x 递增没有信息量，
+反而会让「v0.2 支持了什么」这种问题变得没法回答。
+发布时在这里写死一个版本号，并同步 CHANGELOG 与 ROADMAP。
+"""
 
-# 版本语义：0.x 阶段次版本号对应一个可用里程碑，不是「不兼容」信号
-HISTORY = [
-    ("0.2.0", "2026-10-28", "Workbench", "研究工作台：画像、推荐、项目、笔记、活动流、更新日志、设置"),
-    ("0.1.0", "2026-10-28", "Mirror", "首个版本：六源检索、学科摘要、三层查重、关联图谱、聚类精选、缺口分析"),
-]
+__version__ = "dev"
+__stage__ = "开发版 · 未发布"
+__build__ = "2026-10-28"
+
+
+def is_released() -> bool:
+    return __version__ != "dev"
+
+
+def label() -> str:
+    return f"v{__version__}" if is_released() else __stage__
 
 
 def info() -> dict:
-    return {"version": __version__, "date": __release_date__,
-            "codename": __codename__, "history": HISTORY}
+    return {"version": __version__, "stage": __stage__, "build": __build__,
+            "released": is_released()}
