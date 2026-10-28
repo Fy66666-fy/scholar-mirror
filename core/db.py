@@ -128,7 +128,27 @@ CREATE TABLE IF NOT EXISTS activity (
     created_at REAL
 );
 
+CREATE TABLE IF NOT EXISTS reading_list (
+    sid TEXT PRIMARY KEY,
+    priority INTEGER DEFAULT 2,
+    source TEXT DEFAULT '',
+    note TEXT DEFAULT '',
+    added_at REAL,
+    done_at REAL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS rec_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    sid TEXT DEFAULT '',
+    action TEXT DEFAULT '',
+    channel TEXT DEFAULT '',
+    score REAL DEFAULT 0,
+    features TEXT DEFAULT '',
+    created_at REAL
+);
+
 CREATE INDEX IF NOT EXISTS idx_papers_group ON papers(group_name);
+CREATE INDEX IF NOT EXISTS idx_reading_done ON reading_list(done_at);
+CREATE INDEX IF NOT EXISTS idx_events_time ON rec_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_notes_sid ON notes(sid);
 CREATE INDEX IF NOT EXISTS idx_pp_project ON project_papers(project_id);
 CREATE INDEX IF NOT EXISTS idx_ms_project ON milestones(project_id);
@@ -191,7 +211,7 @@ def info() -> dict:
     """给设置页用：库文件大小、各表行数。"""
     size = DB_PATH.stat().st_size / 1024 / 1024 if DB_PATH.exists() else 0.0
     tables = ["papers", "searches", "interests", "projects", "project_papers",
-              "milestones", "notes", "activity"]
+              "milestones", "notes", "activity", "reading_list", "rec_events"]
     counts = {}
     for t in tables:
         try:

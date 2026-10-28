@@ -60,8 +60,36 @@ def _keywords(work: dict) -> list[str]:
     return out
 
 
+def _to_paper(w: dict) -> dict:
+    oid = (w.get("id") or "").rsplit("/", 1)[-1]
+    authors = [(a.get("author") or {}).get("display_name", "")
+               for a in (w.get("authorships") or [])]
+    loc = w.get("primary_location") or {}
+    src = (loc.get("source") or {})
+    refs = [r.rsplit("/", 1)[-1] for r in (w.get("referenced_works") or [])]
+    return schema.normalize_paper({
+        "title": w.get("title") or w.get("display_name") or "",
+        "abstract": _abstract_from_index(w.get("abstract_inverted_index")),
+        "authors": [a for a in authors if a],
+        "year": w.get("publication_year"),
+        "venue": src.get("display_name") or "",
+        "doi": w.get("doi") or "",
+        "openalex_id": oid,
+        "url": w.get("doi") or (w.get("id") or ""),
+        "pdf_url": _pdf_url(w),
+        "type": (w.get("type") or "").replace("-", " "),
+        "fields": _topics(w),
+        "keywords": _keywords(w),
+        "cited_by": w.get("cited_by_count") or 0,
+        "refs": refs,
+        "is_oa": bool((w.get("open_access") or {}).get("is_oa")),
+        "source": "openalex",
+    })
+
+
 def search(query: str, *, limit: int = 25, year_from: int | None = None,
-           oa_only: bool = False, lang: str | None = None, **_) -> list[dict]:
+           oa_only: bool = False, lang: str | None = None,
+           sort: str = "relevance_score:desc", **_) -> list[dict]:
     filters = []
     if lang == "zh":
         filters.append("language:zh")
@@ -73,7 +101,7 @@ def search(query: str, *, limit: int = 25, year_from: int | None = None,
         "search": query,
         "per-page": min(max(limit, 1), 100),
         "mailto": http.polite_mailto(),
-        "sort": "relevance_score:desc",
+        "sort": sort,
     }
     if filters:
         params["filter"] = ",".join(filters)
@@ -81,32 +109,43 @@ def search(query: str, *, limit: int = 25, year_from: int | None = None,
     if not data:
         return []
 
-    out = []
-    for w in data.get("results") or []:
-        oid = (w.get("id") or "").rsplit("/", 1)[-1]
-        authors = [
-            (a.get("author") or {}).get("display_name", "")
-            for a in (w.get("authorships") or [])
-        ]
-        loc = w.get("primary_location") or {}
-        src = (loc.get("source") or {})
-        refs = [r.rsplit("/", 1)[-1] for r in (w.get("referenced_works") or [])]
-        out.append(schema.normalize_paper({
-            "title": w.get("title") or w.get("display_name") or "",
-            "abstract": _abstract_from_index(w.get("abstract_inverted_index")),
-            "authors": [a for a in authors if a],
-            "year": w.get("publication_year"),
-            "venue": src.get("display_name") or "",
-            "doi": w.get("doi") or "",
-            "openalex_id": oid,
-            "url": w.get("doi") or (w.get("id") or ""),
-            "pdf_url": _pdf_url(w),
-            "type": (w.get("type") or "").replace("-", " "),
-            "fields": _topics(w),
-            "keywords": _keywords(w),
-            "cited_by": w.get("cited_by_count") or 0,
-            "refs": refs,
-            "is_oa": bool((w.get("open_access") or {}).get("is_oa")),
-            "source": "openalex",
-        }))
-    return out
+    return [_to_paper(w) for w in (data.get("results") or [])]
+
+
+
+def citing(doi_or_id: str, *, limit: int = 20, year_from: int | None = None) -> list[dict]:
+    """前向引用：谁引用了这篇。用于推荐的「引用脉络」召回。
+
+    OpenAlex 需要内部 id（W123），DOI 得先解析一次。两步都可能 429，
+    失败就返回空，由调用方降级 —— 引用召回是加分项，不是必需项。
+    """
+    if not doi_or_id:
+        return []
+    wid = ""
+    if doi_or_id.lower().startswith("w") and doi_or_id[1:].isdigit():
+        wid = doi_or_id
+    else:
+        key = doi_or_id if doi_or_id.startswith("http") else f"https://doi.org/{doi_or_id}"
+        # 解析 DOI 用 0 次重试：解析不到就是没有，重试只会拖慢整体召回
+        meta = http.get_json(f"https://api.openalex.org/works/{key}", ttl_kind="record",
+                             params={"mailto": http.polite_mailto()},
+                             retries=0, timeout=12)
+        if not meta:
+            return []
+        wid = (meta.get("id") or "").rsplit("/", 1)[-1]
+    if not wid:
+        return []
+
+    filters = [f"cites:{wid}"]
+    if year_from:
+        filters.append(f"from_publication_date:{year_from}-01-01")
+    data = http.get_json("https://api.openalex.org/works", ttl_kind="search", retries=1,
+                         timeout=15, params={
+        "filter": ",".join(filters),
+        "per-page": min(max(limit, 1), 50),
+        "sort": "cited_by_count:desc",
+        "mailto": http.polite_mailto(),
+    })
+    if not data:
+        return []
+    return [_to_paper(w) for w in (data.get("results") or [])]

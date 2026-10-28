@@ -195,7 +195,8 @@ def test_recommend_score_prefers_matching_topic(fresh_db, papers):
     assert items
     top = items[0]["paper"]["title"].lower()
     assert "microplastic" in top or "soil" in top
-    assert set(items[0]["parts"]) == {"相关度", "库内邻近", "种子邻近", "影响力", "时效性"}
+    assert set(items[0]["parts"]) == {"相关度", "库内邻近", "种子邻近", "引用脉络",
+                                      "引用速度", "时效性", "新颖度", "可获得性"}
     assert items[0]["reasons"]
 
 

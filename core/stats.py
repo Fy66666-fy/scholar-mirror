@@ -8,7 +8,7 @@ from __future__ import annotations
 import datetime as dt
 import time
 
-from core import activity, db, library, notes, profile, workspace
+from core import activity, db, library, notes, profile, reading, workspace
 
 
 def _days_ago(ts: float | None) -> int | None:
@@ -32,10 +32,11 @@ def streak() -> int:
 
 
 def reading_queue(limit: int = 6) -> list[dict]:
-    items = library.list_papers(state="在读")
-    if not items:
-        items = library.list_papers()[:limit]
-    return items[:limit]
+    """首页的阅读队列读待读表；队列空了才退回「在读」状态，避免首屏空着。"""
+    items = reading.next_up(limit)
+    if items:
+        return items
+    return library.list_papers(state="在读")[:limit]
 
 
 def library_overview() -> dict:
@@ -80,6 +81,7 @@ def dashboard() -> dict:
     projects = workspace.list_projects()
     return {
         "library": lib,
+        "reading": reading.stats(),
         "projects": projects[:4],
         "project_stats": workspace.overview(),
         "activity": activity.recent(8),
