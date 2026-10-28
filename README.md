@@ -21,6 +21,9 @@ streamlit run app.py
 
 Windows 直接双击 `启动.bat`（会自动找解释器、缺依赖时自动装）。默认端口 8601。
 
+**没有网络也能看效果**：首页点「先看演示数据」，或访问 `http://localhost:8601/?demo=1`，
+会载入 12 篇跨学科示例文献（含一对预印本/正式版、一条跨源重复记录），走的是和真实检索完全相同的分析链路。
+
 第一次用建议：首页输入 `microplastics soil microbial community` → 看检索结果 → 依次点「摘要工坊 / 关联图谱 / 主题聚类 / 缺口与方向」。
 
 ---
@@ -167,6 +170,24 @@ python -m pytest tests -q
 覆盖：分句（缩写/小数）、中英分词、TF-IDF 排序、SimHash、数值与样本量抽取、
 设计判定、跨源合并（含 DOI 冲突）、预印本配对、文本查重、图布局有限性、
 聚类分离度、精选排序、缺口规则与 caveat、导出格式、文献库读写。
+
+页面层用 Streamlit 官方 `AppTest` 做过八页冒烟测试（`tests/` 之外，见开发记录）。
+
+---
+
+## 版本管理
+
+仓库已初始化，首个提交为 `feat: 文献镜像 ScholarMirror 首个版本`。
+
+```bash
+git log --oneline        # 查看提交
+git status               # 工作区状态
+```
+
+`.gitignore` 已排除 `data/cache/`、`data/mirror.db`、`__pycache__` 等运行时产物 ——
+缓存与个人文献库属于本机数据，不进版本库。`.gitattributes` 统一了换行符（脚本 .bat 用 CRLF）。
+
+提交信息约定：`feat:` 新功能 / `fix:` 修复 / `refactor:` 重构 / `docs:` 文档 / `test:` 测试。
 
 ---
 
