@@ -66,8 +66,8 @@ def _onboarding() -> None:
             st.rerun()
 
     if st.button("先载入演示数据看看", key="ob_demo"):
-        state.load_demo()
-        st.session_state["_goto"] = "文献检索"
+        state.load_demo(seed_workspace=True)
+        st.session_state["_goto"] = "工作台"
         st.rerun()
 
 

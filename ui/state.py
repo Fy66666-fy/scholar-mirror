@@ -150,8 +150,12 @@ def reset() -> None:
     st.session_state["query"] = ""
 
 
-def load_demo() -> dict:
-    """载入内置演示数据（离线可用），走和真实检索一样的去重与分析链路。"""
+def load_demo(seed_workspace: bool = False) -> dict:
+    """载入内置演示数据（离线可用），走和真实检索一样的去重与分析链路。
+
+    seed_workspace=True 时顺带写一份示例文献库/画像/项目，方便第一次打开就看到
+    工作台长什么样。写入的条目带「演示」标签与「演示数据」书架，可直接删除。
+    """
     from core import demo
 
     raw = demo.papers()
@@ -164,6 +168,34 @@ def load_demo() -> dict:
         raw_count=len(raw), dup_groups=d["groups"], merged=d["merged"],
         sources_used=m["sources"], year_from=m["year_from"],
     )
+
+    if seed_workspace:
+        from core import notes, profile, workspace
+
+        ps = d["papers"]
+        library.save(ps[:6], group="演示数据", tags="演示")
+        if not profile.list_interests():
+            profile.add_interest("阿尔茨海默血液标志物",
+                                 "plasma p-tau217, amyloid PET, blood biomarker, diagnosis",
+                                 "医学与生命科学", 1.0)
+            profile.add_interest("微塑料与土壤微生物",
+                                 "microplastics, soil microbial community, aggregates",
+                                 "环境与地球科学", 0.7)
+        profile.set_seeds([p["sid"] for p in ps[:2]])
+        if not workspace.list_projects():
+            pid = workspace.create(
+                "示例项目：血浆 p-tau217 的筛查价值",
+                "p-tau217 能否替代 PET 作为一线筛查工具？",
+                "演示项目，可直接删除。",
+            )
+            for p in ps[:3]:
+                workspace.add_paper(pid, p["sid"], "核心")
+            workspace.add_milestone(pid, "完成 20 篇文献的结构化摘要")
+            m2 = workspace.add_milestone(pid, "整理现有队列的随访时长")
+            workspace.toggle_milestone(m2, True)
+            notes.add("三篇队列的随访都在 24 个月内，长期证据仍然缺。",
+                      project_id=pid, kind="疑问")
+
     return {"raw": len(raw), "unique": len(d["papers"]), "merged": d["merged"]}
 
 

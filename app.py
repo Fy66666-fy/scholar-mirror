@@ -111,12 +111,13 @@ def main() -> None:
     theme.inject()
     state.init()
 
-    # ?demo=1 直接载入内置演示数据，方便第一次打开或离线时看效果
+    # ?demo=1 只载入演示文献池；?demo=full 额外写入示例文献库/画像/项目
     try:
-        if st.query_params.get("demo") and not st.session_state.get("_demo_loaded"):
-            state.load_demo()
+        demo_mode = str(st.query_params.get("demo") or "").lower()
+        if demo_mode and not st.session_state.get("_demo_loaded"):
+            state.load_demo(seed_workspace=demo_mode == "full")
             st.session_state["_demo_loaded"] = True
-            st.session_state["_goto"] = "文献检索"
+            st.session_state["_goto"] = "工作台" if demo_mode == "full" else "文献检索"
     except Exception:
         pass
 
