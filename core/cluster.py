@@ -24,65 +24,114 @@ from core import text as T
 
 
 def _combined_sim(papers: list[dict], feats: dict | None = None) -> np.ndarray:
-    """文本余弦为主，概念重叠做平滑：纯文本会把「同一概念不同措辞」拆开。"""
+    """文本余弦为主，概念重叠做平滑：纯文本会把「同一概念不同措辞」拆开。
+
+    概念 Jaccard 用 0/1 关联矩阵一次算完全部两两对，
+    纯 Python 双循环在 400 篇时是 8 万次集合运算，这里是两次矩阵乘法。
+    """
     feats = feats or related.build_features(papers)
     text_sim = feats["text_sim"]
     n = len(papers)
-    concept = np.zeros((n, n))
-    for i in range(n):
-        for j in range(i + 1, n):
-            c = T.jaccard(feats["concepts"][i], feats["concepts"][j])
-            concept[i, j] = concept[j, i] = c
+    terms: set = set()
+    for cs in feats["concepts"]:
+        terms |= cs
+    if not terms:
+        return 0.75 * text_sim
+    pos = {t: i for i, t in enumerate(terms)}
+    inc = np.zeros((n, len(terms)), dtype=np.float64)
+    for i, cs in enumerate(feats["concepts"]):
+        for t in cs:
+            inc[i, pos[t]] = 1.0
+    inter = inc @ inc.T
+    sz = inc.sum(axis=1)
+    union = sz[:, None] + sz[None, :] - inter
+    concept = np.divide(inter, union, out=np.zeros_like(inter), where=union > 0)
     return 0.75 * text_sim + 0.25 * concept
 
 
-def _agglomerate(sim: np.ndarray, k: int | None = None, threshold: float = 0.55) -> list[int]:
+def _merge_sequence(sim: np.ndarray) -> list[tuple[int, float, list[int]]]:
+    """把平均连接层次聚类一次性跑到底，记下每一帧 (簇数, 合并相似度, 划分快照)。
+
+    层次聚类的关键性质：合并序列是确定的，任何 k 的切分都是序列里的一帧。
+    之前的实现每试一个 k 就从头聚类一遍（2–8 共七遍），每遍又是纯 Python
+    双循环逐对求均值 —— 400 篇要 35 秒的根源就在这。现在跑一遍，
+    组平均相似度用 Lance–Williams 增量公式更新，不再重算全矩阵。
+    """
     n = len(sim)
-    if n == 0:
-        return []
-    clusters: list[list[int]] = [[i] for i in range(n)]
-    while len(clusters) > 1:
-        best, bi, bj = -1.0, -1, -1
-        for a in range(len(clusters)):
-            for b in range(a + 1, len(clusters)):
-                vals = [sim[i, j] for i in clusters[a] for j in clusters[b]]
-                avg = sum(vals) / len(vals)
-                if avg > best:
-                    best, bi, bj = avg, a, b
-        if k is not None and len(clusters) <= k:
+    S = np.asarray(sim, dtype=np.float64).copy()
+    np.fill_diagonal(S, -np.inf)
+    sizes = np.ones(n, dtype=np.int64)
+    lab = np.arange(n)
+    act = list(range(n))
+    snaps: list[tuple[int, float, list[int]]] = [(n, 1.0, lab.copy())]
+    for step in range(n - 1):
+        sub = S[np.ix_(act, act)]
+        flat = int(np.argmax(sub))
+        la, lb = divmod(flat, len(act))
+        a, b = act[la], act[lb]
+        best = float(S[a, b])
+        # 合并 b 入 a：到其他簇的平均相似度按簇大小加权，等价于全体成员对求均值
+        S[a, :] = (sizes[a] * S[a, :] + sizes[b] * S[b, :]) / (sizes[a] + sizes[b])
+        S[:, a] = S[a, :]
+        S[a, a] = -np.inf
+        S[b, :] = -np.inf
+        S[:, b] = -np.inf
+        sizes[a] += sizes[b]
+        lab[lab == b] = a
+        act[lb] = act[-1]
+        act.pop()
+        snaps.append((n - step - 1, best, lab.copy()))
+    return snaps
+
+
+def _relabel_by_size(lab: np.ndarray) -> list[int]:
+    """按簇大小降序重新编号，让「0 号」永远是最大的方向（与旧实现一致）。"""
+    ids, counts = np.unique(lab, return_counts=True)
+    order = np.argsort(-counts)
+    mapping = {int(ids[k]): r for r, k in enumerate(order)}
+    return [mapping[int(x)] for x in lab]
+
+
+def _labels_at_k(snaps: list[tuple[int, float, list[int]]], n: int, k: int) -> list[int]:
+    for cnt, _, lab in snaps:
+        if cnt == k:
+            return _relabel_by_size(lab)
+    return _relabel_by_size(snaps[-1][2])
+
+
+def _labels_at_threshold(snaps: list[tuple[int, float, list[int]]],
+                         threshold: float) -> list[int]:
+    """k=None 时的旧行为：合并相似度低于阈值就停在那一步。"""
+    best = snaps[0][2]
+    for _, merge_sim, lab in snaps[1:]:
+        if merge_sim < threshold:
             break
-        if k is None and best < threshold:
-            break
-        clusters[bi].extend(clusters[bj])
-        clusters.pop(bj)
-    labels = [0] * n
-    # 按簇大小降序编号，让「0 号」永远是最大的方向
-    clusters.sort(key=len, reverse=True)
-    for cid, members in enumerate(clusters):
-        for m in members:
-            labels[m] = cid
-    return labels
+        best = lab
+    return _relabel_by_size(best)
 
 
 def _silhouette(sim: np.ndarray, labels: list[int]) -> float:
-    n = len(labels)
-    uniq = sorted(set(labels))
-    if len(uniq) < 2 or n < 3:
+    """轮廓系数，向量化：O(n²k) 矩阵运算替代逐点的 Python 循环。"""
+    lab = np.asarray(labels)
+    n = lab.size
+    uniq = np.unique(lab)
+    if uniq.size < 2 or n < 3:
         return 0.0
-    dist = 1.0 - sim
-    scores = []
-    for i in range(n):
-        own = [j for j in range(n) if j != i and labels[j] == labels[i]]
-        if not own:
-            scores.append(0.0)
-            continue
-        a = float(np.mean([dist[i, j] for j in own]))
-        b = min(
-            float(np.mean([dist[i, j] for j in range(n) if labels[j] == c]))
-            for c in uniq if c != labels[i]
-        )
-        scores.append((b - a) / max(a, b) if max(a, b) > 0 else 0.0)
-    return round(float(np.mean(scores)), 4)
+    dist = np.clip(1.0 - np.asarray(sim), 0.0, None)
+    np.fill_diagonal(dist, 0.0)
+    k = uniq.size
+    idx = np.searchsorted(uniq, lab)
+    onehot = np.zeros((n, k))
+    onehot[np.arange(n), idx] = 1.0
+    cnt = onehot.sum(axis=0)
+    sums = onehot.T @ dist                       # k×n：每点到每个簇的距离和
+    own_mean = sums[idx, np.arange(n)] / np.maximum(cnt[idx] - 1, 1)
+    other = sums / np.maximum(cnt[:, None], 1)
+    other[idx, np.arange(n)] = np.inf
+    b = other.min(axis=0)
+    denom = np.maximum(own_mean, b)
+    s = np.where(denom > 0, (b - own_mean) / np.where(denom > 0, denom, 1.0), 0.0)
+    return round(float(np.mean(s)), 4)
 
 
 def cluster(papers: list[dict], k: int | None = None, threshold: float = 0.55) -> dict:
@@ -96,24 +145,26 @@ def cluster(papers: list[dict], k: int | None = None, threshold: float = 0.55) -
     if n < 3:
         labels = [0] * n
         sil, method = 0.0, "样本过少，不聚类"
-    elif k is not None:
-        labels = _agglomerate(sim, k=k)
-        sil, method = _silhouette(sim, labels), f"平均连接 · 指定 k={k}"
     else:
-        best = (-2.0, None)
-        for kk in range(2, min(9, n)):
-            lab = _agglomerate(sim, k=kk)
-            if len(set(lab)) < 2:
-                continue
-            s = _silhouette(sim, lab)
-            if s > best[0]:
-                best = (s, lab)
-        if best[1] is None:
-            labels = _agglomerate(sim, threshold=threshold)
-            sil = _silhouette(sim, labels)
+        snaps = _merge_sequence(sim)
+        if k is not None:
+            labels = _labels_at_k(snaps, n, k)
+            sil, method = _silhouette(sim, labels), f"平均连接 · 指定 k={k}"
         else:
-            labels, sil = best[1], best[0]
-        method = "平均连接 · 轮廓系数选 k"
+            best = (-2.0, None)
+            for kk in range(2, min(9, n)):
+                lab = _labels_at_k(snaps, n, kk)
+                if len(set(lab)) < 2:
+                    continue
+                s = _silhouette(sim, lab)
+                if s > best[0]:
+                    best = (s, lab)
+            if best[1] is None:
+                labels = _labels_at_threshold(snaps, threshold)
+                sil = _silhouette(sim, labels)
+            else:
+                labels, sil = best[1], best[0]
+            method = "平均连接 · 轮廓系数选 k"
 
     clusters = _describe(papers, labels, feats)
     return {"labels": labels, "clusters": clusters, "k": len({*labels}), "silhouette": sil, "method": method}
