@@ -145,6 +145,16 @@ CREATE TABLE IF NOT EXISTS rec_events (
     features TEXT DEFAULT '',
     created_at REAL
 );
+CREATE TABLE IF NOT EXISTS fulltext (
+    sid TEXT PRIMARY KEY,
+    pages INTEGER DEFAULT 0,
+    chars INTEGER DEFAULT 0,
+    sections TEXT DEFAULT '{}',
+    text TEXT DEFAULT '',
+    file_name TEXT DEFAULT '',
+    added_at REAL
+);
+CREATE INDEX IF NOT EXISTS idx_fulltext_sid ON fulltext(sid);
 
 CREATE INDEX IF NOT EXISTS idx_papers_group ON papers(group_name);
 CREATE INDEX IF NOT EXISTS idx_reading_done ON reading_list(done_at);

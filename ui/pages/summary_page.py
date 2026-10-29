@@ -144,6 +144,8 @@ def _single(paper: dict, key_prefix: str = "") -> None:
             label_visibility="collapsed",
         )
 
+    _fulltext_block(paper, summ)
+
     _translate_block(paper, summ)
 
     with st.expander("原文定位：每句话落在哪一栏", expanded=False):
@@ -161,6 +163,69 @@ def _single(paper: dict, key_prefix: str = "") -> None:
         c1.download_button("Markdown", md.encode("utf-8"), file_name="summary.md", use_container_width=True)
         c2.download_button("BibTeX", export.to_bibtex([paper]).encode("utf-8"),
                            file_name="paper.bib", use_container_width=True)
+
+
+def _fulltext_block(paper: dict, summ: dict) -> None:
+    """PDF 全文解析：上传 → 切章节 → 六槽位重新抽取（来源标「全文」）。"""
+    from core import fulltext as FT
+
+    sid = paper.get("sid", "x")
+    ft = FT.load(sid)
+    with st.expander("PDF 全文解析", expanded=bool(ft)):
+        if ft:
+            secs = ft.get("sections") or {}
+            theme.stats([
+                ("页数", str(ft.get("pages", 0)), ""),
+                ("字符", str(ft.get("chars", 0)), ""),
+                ("识别章节", str(len(secs)), "个"),
+                ("槽位完整度", f"{summ['coverage_pct']}% → "
+                 f"{summarize.structured_fulltext(paper, secs)['coverage_pct']}%" if secs else "—", ""),
+            ])
+            if secs:
+                st.markdown(theme.pills(
+                    [f"{zh} {c} 字" for zh, _, c in FT.parse_stats(secs)], "solid"),
+                    unsafe_allow_html=True)
+                fsumm = summarize.structured_fulltext(paper, secs)
+                for slot in ("question", "method", "data", "findings", "conclusion", "limitation"):
+                    cell = fsumm["slots"][slot]
+                    if cell["sentences"]:
+                        body = "".join(
+                            f'<div class="sm-quote" style="margin-bottom:6px;">{theme.esc(x["text"])}'
+                            f'<span class="sm-pill" style="margin-left:8px;font-size:10.5px;">'
+                            f'{theme.esc(x["loc"])}</span></div>'
+                            for x in cell["sentences"]
+                        )
+                        st.markdown(
+                            f'<div class="sm-slot"><div class="lb">{theme.esc(cell["label"])}'
+                            f'<span class="sm-pill ok">全文</span></div>'
+                            f'<div class="tx">{body}</div></div>',
+                            unsafe_allow_html=True,
+                        )
+                    else:
+                        st.markdown(
+                            f'<div class="sm-slot empty"><div class="lb">{theme.esc(cell["label"])}</div>'
+                            f'<div class="tx">全文对应章节里没有抽到贴切的原句</div></div>',
+                            unsafe_allow_html=True,
+                        )
+            else:
+                theme.empty("没识别出章节结构",
+                            "常见于扫描版 PDF 或特殊排版。正文已保存，句子级全文查重会用到它。")
+            if st.button("清除全文", key=f"ft_del_{sid}"):
+                FT.remove(sid)
+                st.success("已清除")
+                st.rerun()
+
+        uploaded = st.file_uploader("上传这篇论文的 PDF", type=["pdf"], key=f"ft_up_{sid}")
+        if uploaded is not None and st.button("解析并保存", key=f"ft_go_{sid}", type="primary"):
+            try:
+                with st.spinner("解析中…"):
+                    parsed = FT.parse_pdf_bytes(uploaded.getvalue())
+                FT.save(sid, parsed, uploaded.name)
+                st.toast(f"已解析 {parsed['pages']} 页 / {parsed['chars']} 字符，"
+                         f"识别 {len(parsed['sections'])} 个章节")
+                st.rerun()
+            except Exception as exc:  # noqa: BLE001
+                st.error(f"解析失败：{exc}")
 
 
 def _translate_block(paper: dict, summ: dict) -> None:

@@ -325,6 +325,90 @@ def batch(papers: list[dict], template_key: str | None = None) -> list[dict]:
     return [structured(p, template_key) for p in papers]
 
 
+def structured_fulltext(paper: dict, sections: dict[str, str],
+                        template_key: str | None = None,
+                        max_per_slot: int = 3) -> dict:
+    """从 PDF 全文章节重新抽取六槽位。输出结构与 structured() 同构，
+    但 source 标「fulltext」，每句的 loc 指向章节名而不是摘要位置。
+
+    与摘要版的关键差别：全文里证据是按章节组织的，所以不做「按位置推断」
+    （那套启发式是为摘要的紧凑结构设计的）；某槽位抽不到就老实标 missing，
+    这本身就是全文比摘要诚实的地方 —— 摘要没写 ≠ 研究没做。
+    """
+    from core import fulltext as FT
+
+    tpl_key = template_key or templates.auto_template(paper)
+    slot_bodies = FT.slot_sections(sections)   # {slot: [(规范名, 章节文本)]}
+
+    out_slots = {}
+    filled = 0
+    all_numbers = []
+    for slot in templates.SLOTS:
+        picked: list[dict] = []
+        for sec_name, body in slot_bodies.get(slot) or []:
+            sents = [s for s in T.split_sentences(body) if len(s) > 8]
+            if not sents:
+                continue
+            # 每章用线索打分选最贴的几句，保底取段首（方法章的第一句通常是设计概述）
+            sc = score_sentences(sents, tpl_key)
+            ranked = sorted(range(len(sents)),
+                            key=lambda i: -(sc[i].get(slot, 0.0) + (0.3 if i == 0 else 0.0)))
+            sec_label = FT.sec_label(sec_name)
+            for i in ranked[:max_per_slot]:
+                picked.append({"text": sents[i], "loc": f"全文 · {sec_label}"})
+            all_numbers.extend(T.extract_numbers(body))
+        # 去重并限制总量
+        seen: set[str] = set()
+        uniq = []
+        for x in picked:
+            if x["text"] in seen:
+                continue
+            seen.add(x["text"])
+            uniq.append(x)
+        picked = uniq[:max_per_slot + 1]
+        if picked:
+            filled += 1
+        out_slots[slot] = {
+            "label": templates.slot_label(tpl_key, slot),
+            "sentences": picked,
+            "missing": not picked,
+            "inferred": False,
+        }
+
+    # 数字去重（同一数值可能在方法与结果章各出现一次）
+    seen_n = set()
+    numbers = []
+    for n in all_numbers:
+        key = (n.get("kind"), n.get("value"))
+        if key in seen_n:
+            continue
+        seen_n.add(key)
+        numbers.append(n)
+
+    coverage = filled / len(templates.SLOTS)
+    conf = coverage * 45 + 20 + min(len(numbers), 6) * 3
+    confidence = int(round(min(conf, 98)))
+
+    return {
+        "sid": paper.get("sid", ""),
+        "title": paper.get("title", ""),
+        "template": tpl_key,
+        "template_name": templates.get(tpl_key)["name"],
+        "structured": True,
+        "slots": out_slots,
+        "one_liner": _one_liner({s: [x["text"] for x in out_slots[s]["sentences"]] for s in out_slots}),
+        "numbers": numbers,
+        "coverage": filled,
+        "coverage_pct": int(round(coverage * 100)),
+        "confidence": confidence,
+        "confidence_label": "高" if confidence >= 70 else ("中" if confidence >= 45 else "低"),
+        "sentence_count": 0,
+        "chars": sum(len(v) for v in (sections or {}).values()),
+        "has_abstract": bool(paper.get("abstract")),
+        "source": "fulltext",
+    }
+
+
 def keywords(paper: dict, top_n: int = 8) -> list[str]:
     """优先用作者/MeSH 关键词，缺失时从标题摘要抽。"""
     given = [k for k in (paper.get("keywords") or []) if k]
