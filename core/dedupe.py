@@ -311,65 +311,166 @@ def _kind(a: dict, b: dict, score: float) -> tuple[str, str]:
 # --------------------------------------------------------------------------
 # 文本查重
 # --------------------------------------------------------------------------
-def _corpus_sentences(papers: list[dict]) -> list[dict]:
-    out = []
+def _corpus_sentences(papers: list[dict], fulltexts: dict[str, dict] | None = None,
+                      max_per_paper: int = 600) -> tuple[list[dict], dict]:
+    """构造查重语料：标题 + 摘要 +（可选）已解析的全文分章。
+
+    全文按章节进语料，命中时能说清「抄自哪一篇的哪一章」——摘要级查重
+    只能说「抄自某篇」，说不清位置。同一句话在多个来源出现时只留第一次
+    （标题 > 摘要 > 全文），避免重复命中把重复率抬高。
+    """
+    fulltexts = fulltexts or {}
+    out: list[dict] = []
+    seen: set[str] = set()
+    stats = {"title": 0, "abstract": 0, "fulltext": 0, "papers_with_fulltext": 0, "truncated": 0}
+
+    def add(text: str, p: dict, field: str, loc: str) -> None:
+        key = text.strip()
+        if len(key) < 12 or key in seen:
+            return
+        seen.add(key)
+        out.append({"text": text, "sid": p.get("sid", ""), "title": p.get("title", ""),
+                    "year": p.get("year"), "field": field, "loc": loc})
+        stats[field] += 1
+
     for p in papers:
-        # 标题也进语料：抄标题同样算重复，且标题短、命中率高
+        sid = p.get("sid", "")
         if p.get("title"):
-            out.append({"text": p["title"], "sid": p.get("sid", ""), "title": p.get("title", ""),
-                        "year": p.get("year"), "field": "title"})
+            add(p["title"], p, "title", "标题")
         for s in T.split_sentences(p.get("abstract") or ""):
             if len(s) >= 18:
-                out.append({"text": s, "sid": p.get("sid", ""), "title": p.get("title", ""),
-                            "year": p.get("year"), "field": "abstract"})
-    return out
+                add(s, p, "abstract", "摘要")
+        ft = fulltexts.get(sid)
+        if not ft:
+            continue
+        stats["papers_with_fulltext"] += 1
+        secs = ft.get("sections") or {}
+        used = 0
+        for sec_name, body in secs.items():
+            if sec_name in ("references", "acknowledgements", "funding"):
+                continue
+            label = f"全文 · {_sec_zh(sec_name)}"
+            for s in T.split_sentences(body):
+                if len(s) < 18:
+                    continue
+                if used >= max_per_paper:
+                    stats["truncated"] += 1
+                    break
+                before = stats["fulltext"]
+                add(s, p, "fulltext", label)
+                if stats["fulltext"] > before:
+                    used += 1
+    return out, stats
 
 
-def text_similarity(text: str, papers: list[dict], threshold: float = 0.52) -> dict:
+def _sec_zh(name: str) -> str:
+    from core import fulltext as FT
+    return FT.sec_label(name)
+
+
+def _vocab_cap(n_docs: int) -> int:
+    """按文档数收词表：Tfidf 内部是稠密矩阵，6000 句 × 6000 词要 288MB。
+
+    目标是把矩阵压在 200MB 以内（float64 建表阶段），再转 float32。
+    语料少时不设限，语料多时降词表 —— 逐句查重靠的是高频实词，
+    砍掉长尾词对命中率影响很小。
+    """
+    return int(min(6000, max(2000, 2.0e8 / (8 * max(n_docs, 1)))))
+
+
+def text_similarity(text: str, papers: list[dict], threshold: float = 0.52,
+                    fulltexts: dict[str, dict] | None = None) -> dict:
     """逐句查重。
 
     对每一句：在语料所有句子里找最相似的一句，取余弦。超过阈值即标为命中。
     重复率按「命中句的字符数 / 总字符数」算，比按句数更贴近直觉
     （抄一句长句和抄一句短句，严重程度显然不同）。
+
+    fulltexts 传 {sid: 解析结果} 时语料从摘要扩到全文，命中能定位到章节。
+    语料上千句时逐块做矩阵乘，不一次性铺开整张余弦矩阵（否则几千句
+    × 数千词就是几百 MB）。
     """
     sentences = [s for s in T.split_sentences(text) if len(s) >= 12]
-    corpus = _corpus_sentences(papers)
+    corpus, corpus_stats = _corpus_sentences(papers, fulltexts)
     if not sentences:
-        return {"rate": 0.0, "total": 0, "flagged": [], "matched_papers": [], "chars": 0}
+        return {"rate": 0.0, "total": 0, "hit_sentences": 0, "flagged": [], "matched_papers": [],
+                "chars": 0, "threshold": threshold, "corpus": corpus_stats, "unjudged": 0}
     if not corpus:
-        return {"rate": 0.0, "total": len(sentences), "flagged": [], "matched_papers": [], "chars": len(text)}
+        return {"rate": 0.0, "total": len(sentences), "hit_sentences": 0, "flagged": [],
+                "matched_papers": [], "chars": len(text), "threshold": threshold,
+                "corpus": corpus_stats, "unjudged": len(sentences)}
 
-    tf = T.Tfidf(min_df=1)
+    tf = T.Tfidf(min_df=1, max_features=_vocab_cap(len(corpus) + len(sentences)))
     all_texts = [s["text"] for s in corpus] + sentences
-    mat = tf.fit_transform(all_texts)
-    cmat = T.cosine_matrix(mat)
-    corpus_mat = cmat[: len(corpus), len(corpus):]      # 行=语料句, 列=输入句
+    mat = tf.fit_transform(all_texts).astype(np.float32)
+
+    # 有效词守卫：词表截断后，内容词全落在表外的句子会塌缩成同一个近零向量，
+    # 两两余弦变成 1.0 的假命中。这里分两道关：
+    #   1) 向量全零的句子不参与（语料排除、待检句记为无法判定）
+    #   2) 命中对必须有实际词重合（≥2 个词），否则算塌缩artifact而不是重复
+    nnz = (mat != 0).sum(axis=1)
+    corpus_mask = nnz[: len(corpus)] >= 1
+    query_mask = nnz[len(corpus):] >= 1
+    corpus_ids = np.nonzero(corpus_mask)[0]
+    unjudged = int((~query_mask).sum())
+    if corpus_ids.size == 0:
+        return {"rate": 0.0, "total": len(sentences), "hit_sentences": 0, "chars": len(text),
+                "flagged": [], "matched_papers": [], "threshold": threshold,
+                "corpus": corpus_stats, "unjudged": unjudged}
+
+    corpus_vec = mat[corpus_ids]
+    query = mat[len(corpus):][query_mask].T          # V×Q
+
+    best_score = np.zeros(query.shape[1], dtype=np.float32)
+    best_idx = np.zeros(query.shape[1], dtype=np.int64)
+    for start in range(0, corpus_vec.shape[0], 2048):
+        block = corpus_vec[start:start + 2048] @ query
+        local = block.argmax(axis=0)
+        local_score = block.max(axis=0)
+        better = local_score > best_score
+        best_score[better] = local_score[better]
+        best_idx[better] = local[better] + start
 
     flagged = []
     total_chars = sum(len(s) for s in sentences)
     hit_chars = 0.0
     matched_papers: dict[str, dict] = {}
+    tok_cache: dict[int, set] = {}
 
-    for col, sent in enumerate(sentences):
-        col_scores = corpus_mat[:, col]
-        best = int(np.argmax(col_scores)) if col_scores.size else -1
-        score = float(col_scores[best]) if best >= 0 else 0.0
-        if score >= threshold and best >= 0:
-            src = corpus[best]
-            hit_chars += len(sent) * min(1.0, score / 0.9)
-            flagged.append({
-                "sentence": sent,
-                "match": src["text"],
-                "score": round(score, 3),
-                "title": src["title"],
-                "sid": src["sid"],
-                "year": src["year"],
-            })
-            key = src["sid"]
-            rec = matched_papers.setdefault(key, {"sid": key, "title": src["title"],
-                                                  "year": src["year"], "hits": 0, "best": 0.0})
-            rec["hits"] += 1
-            rec["best"] = max(rec["best"], round(score, 3))
+    def _tokens(text: str) -> set:
+        return set(T.tokenize(text))
+
+    judged = [i for i, ok in enumerate(query_mask) if ok]
+    for col, sent_i in enumerate(judged):
+        score = float(best_score[col])
+        if score < threshold:
+            continue
+        src_i = int(corpus_ids[int(best_idx[col])])
+        src = corpus[src_i]
+        sent = sentences[sent_i]
+        # 塌缩artifact 判定：余弦很高但词面几乎不重合
+        ctok = tok_cache.get(src_i)
+        if ctok is None:
+            ctok = tok_cache[src_i] = _tokens(src["text"])
+        if len(_tokens(sent) & ctok) < 2:
+            unjudged += 1
+            continue
+        hit_chars += len(sent) * min(1.0, score / 0.9)
+        flagged.append({
+            "sentence": sent,
+            "match": src["text"],
+            "score": round(score, 3),
+            "title": src["title"],
+            "sid": src["sid"],
+            "year": src["year"],
+            "field": src["field"],
+            "loc": src["loc"],
+        })
+        key = src["sid"]
+        rec = matched_papers.setdefault(key, {"sid": key, "title": src["title"],
+                                              "year": src["year"], "hits": 0, "best": 0.0})
+        rec["hits"] += 1
+        rec["best"] = max(rec["best"], round(score, 3))
 
     rate = round(hit_chars / total_chars * 100, 1) if total_chars else 0.0
     return {
@@ -380,6 +481,8 @@ def text_similarity(text: str, papers: list[dict], threshold: float = 0.52) -> d
         "flagged": sorted(flagged, key=lambda x: -x["score"]),
         "matched_papers": sorted(matched_papers.values(), key=lambda x: (-x["hits"], -x["best"])),
         "threshold": threshold,
+        "corpus": corpus_stats,
+        "unjudged": unjudged,
     }
 
 

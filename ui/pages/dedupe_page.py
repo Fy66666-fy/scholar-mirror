@@ -103,22 +103,44 @@ def _text_tab(ps: list[dict]) -> None:
         theme.empty("文献池为空", "查重需要语料。先在「文献检索」拿到一批文献，或换到文献库语料（下一步支持）。")
         return
 
-    c1, c2 = st.columns([3, 1])
+    from core import fulltext as FT
+
+    sids = [p.get("sid", "") for p in ps]
+    fts = FT.load_many(sids)
+    c1, c2, c3 = st.columns([3, 1, 1])
     text = c1.text_area("待检文本", height=200, key="dup_text",
                         placeholder="粘贴要检查的段落。建议至少 3 句，太短的结果不稳定。")
     thr = c2.slider("命中阈值", 0.40, 0.85, 0.52, 0.01,
                     help="句子级余弦相似度。0.52 左右适合判断「改写过的抄袭」，0.75 以上只抓近似照抄。")
+    use_ft = c3.checkbox("使用全文", value=bool(fts), disabled=not fts,
+                         help=f"当前文献池里 {len(fts)} 篇有已解析的全文。勾上后语料从摘要扩到正文，"
+                              f"命中能定位到章节。")
+
+    if fts and not use_ft:
+        st.caption(f"文献池里有 {len(fts)} 篇已解析全文，勾选「使用全文」可以查出摘要之外的重复。")
+    if not fts:
+        st.caption("提示：语料是当前文献池的标题与摘要。到「摘要工坊 → 单篇深读 → PDF 全文解析」"
+                   "上传 PDF 后，这里可以改用全文语料。")
 
     if st.button("开始查重", type="primary"):
         if not (text or "").strip():
             st.warning("先粘贴文本。")
             return
-        st.session_state["dup_report"] = dedupe.text_similarity(text, ps, threshold=thr)
+        with st.spinner("比对中…"):
+            st.session_state["dup_report"] = dedupe.text_similarity(
+                text, ps, threshold=thr, fulltexts=fts if use_ft else None)
 
     rep = st.session_state.get("dup_report")
     if not rep:
-        st.caption("提示：语料是当前文献池的标题与摘要，不含全文。全文查重需要先拿到 PDF。")
         return
+
+    corpus = rep.get("corpus") or {}
+    if corpus:
+        bits = [f"标题 {corpus.get('title', 0)} 句", f"摘要 {corpus.get('abstract', 0)} 句"]
+        if corpus.get("fulltext"):
+            bits.append(f"全文 {corpus['fulltext']} 句（{corpus.get('papers_with_fulltext', 0)} 篇）")
+        st.markdown('<div class="sm-hint">语料构成：' + " · ".join(bits) + "</div>",
+                    unsafe_allow_html=True)
 
     rate = rep["rate"]
     tone = "#b4623c" if rate >= 30 else ("#a8822f" if rate >= 12 else "#3f7a5e")
@@ -135,17 +157,18 @@ def _text_tab(ps: list[dict]) -> None:
     )
 
     if rep["flagged"]:
-        theme.section("命中明细", "按相似度降序。左边是你写的句子，右边是语料里的原句。", "05")
+        theme.section("命中明细", "按相似度降序。左边是你写的句子，右边是语料里的原句，末列标出命中位置。", "05")
         rows = []
         for f in rep["flagged"]:
+            loc = f.get("loc") or ("摘要" if f.get("field") == "abstract" else "标题")
             rows.append([
                 f'<span class="sm-pill warn">{f["score"]:.2f}</span>',
                 theme.esc(T.shorten(f["sentence"], 110)),
                 theme.esc(T.shorten(f["match"], 130)),
                 f'{theme.esc(T.shorten(f["title"], 46))}<br>'
-                f'<span style="color:#8b9499;font-size:11.5px;">{f["year"] or "—"}</span>',
+                f'<span style="color:#8b9499;font-size:11.5px;">{f["year"] or "—"} · {theme.esc(loc)}</span>',
             ])
-        theme.table(["相似度", "待检句", "语料原句", "来源文献"], rows)
+        theme.table(["相似度", "待检句", "语料原句", "来源文献 / 位置"], rows)
 
     if rep["matched_papers"]:
         theme.section("来源汇总", "", "06")
@@ -155,11 +178,16 @@ def _text_tab(ps: list[dict]) -> None:
         ] for m in rep["matched_papers"]]
         theme.table(["文献", "年份", "命中句数", "最高相似度"], rows)
 
+    corpus = rep.get("corpus") or {}
     md = [f"# 查重报告", "", f"- 重复率：{rate:.1f}%",
           f"- 命中句：{rep['hit_sentences']}/{rep['total']}",
-          f"- 阈值：{rep['threshold']}", "", "## 命中明细", ""]
+          f"- 阈值：{rep['threshold']}",
+          f"- 语料：标题 {corpus.get('title', 0)} 句 / 摘要 {corpus.get('abstract', 0)} 句"
+          + (f" / 全文 {corpus.get('fulltext', 0)} 句" if corpus.get("fulltext") else ""),
+          "", "## 命中明细", ""]
     for f in rep["flagged"]:
-        md += [f"### {f['score']:.2f} · {T.shorten(f['title'], 70)}", "",
+        loc = f.get("loc") or ("摘要" if f.get("field") == "abstract" else "标题")
+        md += [f"### {f['score']:.2f} · {T.shorten(f['title'], 70)}（{loc}）", "",
                f"- 待检：{f['sentence']}", f"- 原文：{f['match']}", ""]
     st.download_button("下载查重报告", "\n".join(md).encode("utf-8"),
                        file_name="plagiarism_report.md")

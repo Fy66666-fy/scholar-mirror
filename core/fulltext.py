@@ -223,6 +223,21 @@ def has(sid: str) -> bool:
     return bool(db.rows("SELECT 1 FROM fulltext WHERE sid=?", (sid,)))
 
 
+def load_many(sids: list[str]) -> dict[str, dict]:
+    """批量取全文，供查重语料一次装配（逐篇查库在几百篇时会明显变慢）。"""
+    ids = [s for s in dict.fromkeys(sids) if s]
+    out: dict[str, dict] = {}
+    for start in range(0, len(ids), 400):
+        chunk = ids[start:start + 400]
+        sql = ("SELECT sid, pages, chars, sections, file_name FROM fulltext WHERE sid IN ("
+               + ",".join("?" * len(chunk)) + ")")
+        for r in db.rows(sql, tuple(chunk)):
+            row = dict(r)
+            row["sections"] = json.loads(row.get("sections") or "{}")
+            out[row["sid"]] = row
+    return out
+
+
 def remove(sid: str) -> None:
     db.execute("DELETE FROM fulltext WHERE sid=?", (sid,))
 
